@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,8 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../Input/Input.h"
 #include "../UI/LineEdit.h"
@@ -28,6 +30,8 @@
 #include "../UI/UIEvents.h"
 
 #include "../DebugNew.h"
+
+#include <SDL/SDL.h>
 
 namespace Urho3D
 {
@@ -38,7 +42,7 @@ extern const char* UI_CATEGORY;
 
 LineEdit::LineEdit(Context* context) :
     BorderImage(context),
-    lastFont_(0),
+    lastFont_(nullptr),
     lastFontSize_(0),
     cursorPosition_(0),
     dragBeginCursor_(M_MAX_UNSIGNED),
@@ -60,29 +64,27 @@ LineEdit::LineEdit(Context* context) :
     cursor_->SetInternal(true);
     cursor_->SetPriority(1); // Show over text
 
-    SubscribeToEvent(this, E_FOCUSED, HANDLER(LineEdit, HandleFocused));
-    SubscribeToEvent(this, E_DEFOCUSED, HANDLER(LineEdit, HandleDefocused));
-    SubscribeToEvent(this, E_LAYOUTUPDATED, HANDLER(LineEdit, HandleLayoutUpdated));
+    SubscribeToEvent(this, E_FOCUSED, URHO3D_HANDLER(LineEdit, HandleFocused));
+    SubscribeToEvent(this, E_DEFOCUSED, URHO3D_HANDLER(LineEdit, HandleDefocused));
+    SubscribeToEvent(this, E_LAYOUTUPDATED, URHO3D_HANDLER(LineEdit, HandleLayoutUpdated));
 }
 
-LineEdit::~LineEdit()
-{
-}
+LineEdit::~LineEdit() = default;
 
 void LineEdit::RegisterObject(Context* context)
 {
     context->RegisterFactory<LineEdit>(UI_CATEGORY);
 
-    COPY_BASE_ATTRIBUTES(BorderImage);
-    UPDATE_ATTRIBUTE_DEFAULT_VALUE("Clip Children", true);
-    UPDATE_ATTRIBUTE_DEFAULT_VALUE("Is Enabled", true);
-    UPDATE_ATTRIBUTE_DEFAULT_VALUE("Focus Mode", FM_FOCUSABLE_DEFOCUSABLE);
-    ACCESSOR_ATTRIBUTE("Max Length", GetMaxLength, SetMaxLength, unsigned, 0, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Is Cursor Movable", IsCursorMovable, SetCursorMovable, bool, true, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Is Text Selectable", IsTextSelectable, SetTextSelectable, bool, true, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Is Text Copyable", IsTextCopyable, SetTextCopyable, bool, true, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Cursor Blink Rate", GetCursorBlinkRate, SetCursorBlinkRate, float, 1.0f, AM_FILE);
-    ATTRIBUTE("Echo Character", int, echoCharacter_, 0, AM_FILE);
+    URHO3D_COPY_BASE_ATTRIBUTES(BorderImage);
+    URHO3D_UPDATE_ATTRIBUTE_DEFAULT_VALUE("Clip Children", true);
+    URHO3D_UPDATE_ATTRIBUTE_DEFAULT_VALUE("Is Enabled", true);
+    URHO3D_UPDATE_ATTRIBUTE_DEFAULT_VALUE("Focus Mode", FM_FOCUSABLE_DEFOCUSABLE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Max Length", GetMaxLength, SetMaxLength, unsigned, 0, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Is Cursor Movable", IsCursorMovable, SetCursorMovable, bool, true, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Is Text Selectable", IsTextSelectable, SetTextSelectable, bool, true, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Is Text Copyable", IsTextCopyable, SetTextCopyable, bool, true, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Cursor Blink Rate", GetCursorBlinkRate, SetCursorBlinkRate, float, 1.0f, AM_FILE);
+    URHO3D_ATTRIBUTE("Echo Character", int, echoCharacter_, 0, AM_FILE);
 }
 
 void LineEdit::ApplyAttributes()
@@ -113,7 +115,8 @@ void LineEdit::Update(float timeStep)
     cursor_->SetVisible(cursorVisible);
 }
 
-void LineEdit::OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor)
+void LineEdit::OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers,
+    Cursor* cursor)
 {
     if (button == MOUSEB_LEFT && cursorMovable_)
     {
@@ -126,20 +129,23 @@ void LineEdit::OnClickBegin(const IntVector2& position, const IntVector2& screen
     }
 }
 
-void LineEdit::OnDoubleClick(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor)
+void LineEdit::OnDoubleClick(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers,
+    Cursor* cursor)
 {
     if (button == MOUSEB_LEFT)
         text_->SetSelection(0);
 }
 
-void LineEdit::OnDragBegin(const IntVector2& position, const IntVector2& screenPosition, int buttons, int qualifiers, Cursor* cursor)
+void LineEdit::OnDragBegin(const IntVector2& position, const IntVector2& screenPosition, int buttons, int qualifiers,
+    Cursor* cursor)
 {
     UIElement::OnDragBegin(position, screenPosition, buttons, qualifiers, cursor);
-    
+
     dragBeginCursor_ = GetCharIndex(position);
 }
 
-void LineEdit::OnDragMove(const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons, int qualifiers, Cursor* cursor)
+void LineEdit::OnDragMove(const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons,
+    int qualifiers, Cursor* cursor)
 {
     if (cursorMovable_ && textSelectable_)
     {
@@ -183,13 +189,13 @@ bool LineEdit::OnDragDropFinish(UIElement* source)
         StringHash sourceType = source->GetType();
         if (sourceType == LineEdit::GetTypeStatic())
         {
-            LineEdit* sourceLineEdit = static_cast<LineEdit*>(source);
+            auto* sourceLineEdit = static_cast<LineEdit*>(source);
             SetText(sourceLineEdit->GetText());
             return true;
         }
         else if (sourceType == Text::GetTypeStatic())
         {
-            Text* sourceText = static_cast<Text*>(source);
+            auto* sourceText = static_cast<Text*>(source);
             SetText(sourceText->GetText());
             return true;
         }
@@ -198,15 +204,15 @@ bool LineEdit::OnDragDropFinish(UIElement* source)
     return false;
 }
 
-void LineEdit::OnKey(int key, int buttons, int qualifiers)
+void LineEdit::OnKey(Key key, MouseButtonFlags buttons, QualifierFlags qualifiers)
 {
     bool changed = false;
     bool cursorMoved = false;
 
     switch (key)
     {
-    case 'X':
-    case 'C':
+    case KEY_X:
+    case KEY_C:
         if (textCopyable_ && qualifiers & QUAL_CTRL)
         {
             unsigned start = text_->GetSelectionStart();
@@ -215,7 +221,7 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             if (text_->GetSelectionLength())
                 GetSubsystem<UI>()->SetClipboardText(line_.SubstringUTF8(start, length));
 
-            if (key == 'X' && editable_)
+            if (key == KEY_X && editable_)
             {
                 if (start + length < line_.LengthUTF8())
                     line_ = line_.SubstringUTF8(0, start) + line_.SubstringUTF8(start + length);
@@ -228,14 +234,14 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
         }
         break;
 
-    case 'V':
+    case KEY_V:
         if (editable_ && textCopyable_ && qualifiers & QUAL_CTRL)
         {
             const String& clipBoard = GetSubsystem<UI>()->GetClipboardText();
             if (!clipBoard.Empty())
             {
                 // Remove selected text first
-                if(text_->GetSelectionLength() > 0)
+                if (text_->GetSelectionLength() > 0)
                 {
                     unsigned start = text_->GetSelectionStart();
                     unsigned length = text_->GetSelectionLength();
@@ -357,8 +363,8 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             VariantMap& eventData = GetEventDataMap();
             eventData[P_ELEMENT] = this;
             eventData[P_KEY] = key;
-            eventData[P_BUTTONS] = buttons;
-            eventData[P_QUALIFIERS] = qualifiers;
+            eventData[P_BUTTONS] = (unsigned)buttons;
+            eventData[P_QUALIFIERS] = (unsigned)qualifiers;
             SendEvent(E_UNHANDLEDKEY, eventData);
         }
         return;
@@ -410,7 +416,8 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             SendEvent(E_TEXTFINISHED, eventData);
             return;
         }
-        break;
+
+    default: break;
     }
 
     if (changed)
@@ -422,25 +429,19 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
         UpdateCursor();
 }
 
-void LineEdit::OnTextInput(const String& text, int buttons, int qualifiers)
+void LineEdit::OnTextInput(const String& text)
 {
     if (!editable_)
         return;
 
     bool changed = false;
 
-    // If only CTRL is held down, do not edit
-    if ((qualifiers & (QUAL_CTRL | QUAL_ALT)) == QUAL_CTRL)
-        return;
-
-    // Send char as an event to allow changing it
-    using namespace CharEntry;
+    // Send text entry as an event to allow changing it
+    using namespace TextEntry;
 
     VariantMap& eventData = GetEventDataMap();
     eventData[P_ELEMENT] = this;
     eventData[P_TEXT] = text;
-    eventData[P_BUTTONS] = buttons;
-    eventData[P_QUALIFIERS] = qualifiers;
     SendEvent(E_TEXTENTRY, eventData);
 
     const String newText = eventData[P_TEXT].GetString().SubstringUTF8(0);
@@ -596,6 +597,10 @@ void LineEdit::UpdateCursor()
     cursor_->SetPosition(text_->GetPosition() + IntVector2(x, 0));
     cursor_->SetSize(cursor_->GetWidth(), text_->GetRowHeight());
 
+    IntVector2 screenPosition = ElementToScreen(cursor_->GetPosition());
+    SDL_Rect rect = {screenPosition.x_, screenPosition.y_, cursor_->GetSize().x_, cursor_->GetSize().y_};
+    SDL_SetTextInputRect(&rect);
+
     // Scroll if necessary
     int sx = -GetChildOffset().x_;
     int left = clipBorder_.left_;
@@ -620,17 +625,16 @@ unsigned LineEdit::GetCharIndex(const IntVector2& position)
     if (textPosition.x_ < 0)
         return 0;
 
-    int numChars = text_->GetNumChars();
-    for (int i = numChars; i >= 0; --i)
+    for (int i = text_->GetNumChars(); i >= 0; --i)
     {
-        if (textPosition.x_ >= text_->GetCharPosition(i).x_)
-            return i;
+        if (textPosition.x_ >= text_->GetCharPosition((unsigned)i).x_)
+            return (unsigned)i;
     }
 
     return M_MAX_UNSIGNED;
 }
 
-void LineEdit::HandleFocused(StringHash eventType, VariantMap& eventData)
+void LineEdit::HandleFocused(StringHash /*eventType*/, VariantMap& eventData)
 {
     if (eventData[Focused::P_BYKEY].GetBool())
     {
@@ -643,7 +647,7 @@ void LineEdit::HandleFocused(StringHash eventType, VariantMap& eventData)
         GetSubsystem<Input>()->SetScreenKeyboardVisible(true);
 }
 
-void LineEdit::HandleDefocused(StringHash eventType, VariantMap& eventData)
+void LineEdit::HandleDefocused(StringHash /*eventType*/, VariantMap& /*eventData*/)
 {
     text_->ClearSelection();
 
@@ -651,7 +655,7 @@ void LineEdit::HandleDefocused(StringHash eventType, VariantMap& eventData)
         GetSubsystem<Input>()->SetScreenKeyboardVisible(false);
 }
 
-void LineEdit::HandleLayoutUpdated(StringHash eventType, VariantMap& eventData)
+void LineEdit::HandleLayoutUpdated(StringHash /*eventType*/, VariantMap& /*eventData*/)
 {
     UpdateCursor();
 }

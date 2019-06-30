@@ -17,6 +17,9 @@ function Start()
     -- Setup the viewport for displaying the scene
     SetupViewport()
 
+    -- Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_RELATIVE)
+
     -- Hook up to the frame update events
     SubscribeToEvents()
 end
@@ -61,7 +64,7 @@ function CreateScene()
     specColorAnimation:SetKeyFrame(2.0, Variant(Color(1.0, 1.0, 0.0, 2.0)))
     specColorAnimation:SetKeyFrame(3.0, Variant(Color(0.1, 0.1, 0.1, 16.0)))
     -- Optionally associate material with scene to make sure shader parameter animation respects scene time scale
-    mushroomMat.scene = scene_;
+    mushroomMat.scene = scene_
     mushroomMat:SetShaderParameterAnimation("MatSpecColor", specColorAnimation)
 
     local NUM_OBJECTS = 200
@@ -147,7 +150,7 @@ end
 
 function HandleUpdate(eventType, eventData)
     -- Take the frame time step, which is stored as a float
-    local timeStep = eventData:GetFloat("TimeStep")
+    local timeStep = eventData["TimeStep"]:GetFloat()
 
     -- Move the camera, scale movement with time step
     MoveCamera(timeStep)

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,14 +20,17 @@
 // THE SOFTWARE.
 //
 
-#include "../Scene/Animatable.h"
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../IO/Log.h"
-#include "../Scene/ObjectAnimation.h"
 #include "../Resource/ResourceCache.h"
+#include "../Resource/JSONValue.h"
+#include "../Resource/XMLElement.h"
+#include "../Scene/Animatable.h"
+#include "../Scene/ObjectAnimation.h"
 #include "../Scene/SceneEvents.h"
 #include "../Scene/ValueAnimation.h"
-#include "../Resource/XMLElement.h"
 
 #include "../DebugNew.h"
 
@@ -36,25 +39,20 @@ namespace Urho3D
 
 extern const char* wrapModeNames[];
 
-AttributeAnimationInfo::AttributeAnimationInfo(Animatable* target, const AttributeInfo& attributeInfo, ValueAnimation* attributeAnimation, WrapMode wrapMode, float speed) :
-    ValueAnimationInfo(target, attributeAnimation, wrapMode, speed),
+AttributeAnimationInfo::AttributeAnimationInfo(Animatable* animatable, const AttributeInfo& attributeInfo,
+    ValueAnimation* attributeAnimation, WrapMode wrapMode, float speed) :
+    ValueAnimationInfo(animatable, attributeAnimation, wrapMode, speed),
     attributeInfo_(attributeInfo)
 {
 }
 
-AttributeAnimationInfo::AttributeAnimationInfo(const AttributeAnimationInfo& other) :
-    ValueAnimationInfo(other),
-    attributeInfo_(other.attributeInfo_)
-{
-}
+AttributeAnimationInfo::AttributeAnimationInfo(const AttributeAnimationInfo& other) = default;
 
-AttributeAnimationInfo::~AttributeAnimationInfo()
-{
-}
+AttributeAnimationInfo::~AttributeAnimationInfo() = default;
 
 void AttributeAnimationInfo::ApplyValue(const Variant& newValue)
 {
-    Animatable* animatable = static_cast<Animatable*>(target_.Get());
+    auto* animatable = static_cast<Animatable*>(target_.Get());
     if (animatable)
     {
         animatable->OnSetAttribute(attributeInfo_, newValue);
@@ -68,21 +66,20 @@ Animatable::Animatable(Context* context) :
 {
 }
 
-Animatable::~Animatable()
-{
-}
+Animatable::~Animatable() = default;
 
 void Animatable::RegisterObject(Context* context)
 {
-    MIXED_ACCESSOR_ATTRIBUTE("Object Animation", GetObjectAnimationAttr, SetObjectAnimationAttr, ResourceRef, ResourceRef(ObjectAnimation::GetTypeStatic()), AM_DEFAULT);
+    URHO3D_MIXED_ACCESSOR_ATTRIBUTE("Object Animation", GetObjectAnimationAttr, SetObjectAnimationAttr, ResourceRef,
+        ResourceRef(ObjectAnimation::GetTypeStatic()), AM_DEFAULT);
 }
 
-bool Animatable::LoadXML(const XMLElement& source, bool setInstanceDefault)
+bool Animatable::LoadXML(const XMLElement& source)
 {
-    if (!Serializable::LoadXML(source, setInstanceDefault))
+    if (!Serializable::LoadXML(source))
         return false;
 
-    SetObjectAnimation(0);
+    SetObjectAnimation(nullptr);
     attributeAnimationInfos_.Clear();
 
     XMLElement elem = source.GetChild("objectanimation");
@@ -123,6 +120,62 @@ bool Animatable::LoadXML(const XMLElement& source, bool setInstanceDefault)
     return true;
 }
 
+bool Animatable::LoadJSON(const JSONValue& source)
+{
+    if (!Serializable::LoadJSON(source))
+        return false;
+
+    SetObjectAnimation(nullptr);
+    attributeAnimationInfos_.Clear();
+
+    JSONValue value = source.Get("objectanimation");
+    if (!value.IsNull())
+    {
+        SharedPtr<ObjectAnimation> objectAnimation(new ObjectAnimation(context_));
+        if (!objectAnimation->LoadJSON(value))
+            return false;
+
+        SetObjectAnimation(objectAnimation);
+    }
+
+    JSONValue attributeAnimationValue = source.Get("attributeanimation");
+
+    if (attributeAnimationValue.IsNull())
+        return true;
+
+    if (!attributeAnimationValue.IsObject())
+    {
+        URHO3D_LOGWARNING("'attributeanimation' value is present in JSON data, but is not a JSON object; skipping it");
+        return true;
+    }
+
+    const JSONObject& attributeAnimationObject = attributeAnimationValue.GetObject();
+    for (JSONObject::ConstIterator it = attributeAnimationObject.Begin(); it != attributeAnimationObject.End(); it++)
+    {
+        String name = it->first_;
+        JSONValue value = it->second_;
+        SharedPtr<ValueAnimation> attributeAnimation(new ValueAnimation(context_));
+        if (!attributeAnimation->LoadJSON(it->second_))
+            return false;
+
+        String wrapModeString = value.Get("wrapmode").GetString();
+        WrapMode wrapMode = WM_LOOP;
+        for (int i = 0; i <= WM_CLAMP; ++i)
+        {
+            if (wrapModeString == wrapModeNames[i])
+            {
+                wrapMode = (WrapMode)i;
+                break;
+            }
+        }
+
+        float speed = value.Get("speed").GetFloat();
+        SetAttributeAnimation(name, attributeAnimation, wrapMode, speed);
+    }
+
+    return true;
+}
+
 bool Animatable::SaveXML(XMLElement& dest) const
 {
     if (!Serializable::SaveXML(dest))
@@ -136,7 +189,9 @@ bool Animatable::SaveXML(XMLElement& dest) const
             return false;
     }
 
-    for (HashMap<String, SharedPtr<AttributeAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin(); i != attributeAnimationInfos_.End(); ++i)
+
+    for (HashMap<String, SharedPtr<AttributeAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin();
+         i != attributeAnimationInfos_.End(); ++i)
     {
         ValueAnimation* attributeAnimation = i->second_->GetAnimation();
         if (attributeAnimation->GetOwner())
@@ -153,6 +208,91 @@ bool Animatable::SaveXML(XMLElement& dest) const
     }
 
     return true;
+}
+
+bool Animatable::SaveJSON(JSONValue& dest) const
+{
+    if (!Serializable::SaveJSON(dest))
+        return false;
+
+    // Object animation without name
+    if (objectAnimation_ && objectAnimation_->GetName().Empty())
+    {
+        JSONValue objectAnimationValue;
+        if (!objectAnimation_->SaveJSON(objectAnimationValue))
+            return false;
+        dest.Set("objectanimation", objectAnimationValue);
+    }
+
+    JSONValue attributeAnimationValue;
+
+    for (HashMap<String, SharedPtr<AttributeAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin();
+         i != attributeAnimationInfos_.End(); ++i)
+    {
+        ValueAnimation* attributeAnimation = i->second_->GetAnimation();
+        if (attributeAnimation->GetOwner())
+            continue;
+
+        const AttributeInfo& attr = i->second_->GetAttributeInfo();
+        JSONValue attributeValue;
+        attributeValue.Set("name", attr.name_);
+        if (!attributeAnimation->SaveJSON(attributeValue))
+            return false;
+
+        attributeValue.Set("wrapmode", wrapModeNames[i->second_->GetWrapMode()]);
+        attributeValue.Set("speed", (float) i->second_->GetSpeed());
+
+        attributeAnimationValue.Set(attr.name_, attributeValue);
+    }
+    
+    if (!attributeAnimationValue.IsNull())
+        dest.Set("attributeanimation", attributeAnimationValue);
+    
+    return true;
+}
+
+void Animatable::SetAnimationEnabled(bool enable)
+{
+    if (objectAnimation_)
+    {
+        // In object animation there may be targets in hierarchy. Set same enable/disable state in all
+        HashSet<Animatable*> targets;
+        const HashMap<String, SharedPtr<ValueAnimationInfo> >& infos = objectAnimation_->GetAttributeAnimationInfos();
+        for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = infos.Begin(); i != infos.End(); ++i)
+        {
+            String outName;
+            Animatable* target = FindAttributeAnimationTarget(i->first_, outName);
+            if (target && target != this)
+                targets.Insert(target);
+        }
+
+        for (HashSet<Animatable*>::Iterator i = targets.Begin(); i != targets.End(); ++i)
+            (*i)->animationEnabled_ = enable;
+    }
+
+    animationEnabled_ = enable;
+}
+
+void Animatable::SetAnimationTime(float time)
+{
+    if (objectAnimation_)
+    {
+        // In object animation there may be targets in hierarchy. Set same time in all
+        const HashMap<String, SharedPtr<ValueAnimationInfo> >& infos = objectAnimation_->GetAttributeAnimationInfos();
+        for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = infos.Begin(); i != infos.End(); ++i)
+        {
+            String outName;
+            Animatable* target = FindAttributeAnimationTarget(i->first_, outName);
+            if (target)
+                target->SetAttributeAnimationTime(outName, time);
+        }
+    }
+    else
+    {
+        for (HashMap<String, SharedPtr<AttributeAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin();
+            i != attributeAnimationInfos_.End(); ++i)
+            i->second_->SetTime(time);
+    }
 }
 
 void Animatable::SetObjectAnimation(ObjectAnimation* objectAnimation)
@@ -172,8 +312,8 @@ void Animatable::SetObjectAnimation(ObjectAnimation* objectAnimation)
     if (objectAnimation_)
     {
         OnObjectAnimationAdded(objectAnimation_);
-        SubscribeToEvent(objectAnimation_, E_ATTRIBUTEANIMATIONADDED, HANDLER(Animatable, HandleAttributeAnimationAdded));
-        SubscribeToEvent(objectAnimation_, E_ATTRIBUTEANIMATIONREMOVED, HANDLER(Animatable, HandleAttributeAnimationRemoved));
+        SubscribeToEvent(objectAnimation_, E_ATTRIBUTEANIMATIONADDED, URHO3D_HANDLER(Animatable, HandleAttributeAnimationAdded));
+        SubscribeToEvent(objectAnimation_, E_ATTRIBUTEANIMATIONREMOVED, URHO3D_HANDLER(Animatable, HandleAttributeAnimationRemoved));
     }
 }
 
@@ -191,7 +331,7 @@ void Animatable::SetAttributeAnimation(const String& name, ValueAnimation* attri
         }
 
         // Get attribute info
-        const AttributeInfo* attributeInfo = 0;
+        const AttributeInfo* attributeInfo = nullptr;
         if (info)
             attributeInfo = &info->GetAttributeInfo();
         else
@@ -199,7 +339,7 @@ void Animatable::SetAttributeAnimation(const String& name, ValueAnimation* attri
             const Vector<AttributeInfo>* attributes = GetAttributes();
             if (!attributes)
             {
-                LOGERROR(GetTypeName() + " has no attributes");
+                URHO3D_LOGERROR(GetTypeName() + " has no attributes");
                 return;
             }
 
@@ -215,14 +355,14 @@ void Animatable::SetAttributeAnimation(const String& name, ValueAnimation* attri
 
         if (!attributeInfo)
         {
-            LOGERROR("Invalid name: " + name);
+            URHO3D_LOGERROR("Invalid name: " + name);
             return;
         }
 
         // Check value type is same with attribute type
         if (attributeAnimation->GetValueType() != attributeInfo->type_)
         {
-            LOGERROR("Invalid value type");
+            URHO3D_LOGERROR("Invalid value type");
             return;
         }
 
@@ -263,6 +403,23 @@ void Animatable::SetAttributeAnimationSpeed(const String& name, float speed)
         info->SetSpeed(speed);
 }
 
+void Animatable::SetAttributeAnimationTime(const String& name, float time)
+{
+    AttributeAnimationInfo* info = GetAttributeAnimationInfo(name);
+    if (info)
+        info->SetTime(time);
+}
+
+void Animatable::RemoveObjectAnimation()
+{
+    SetObjectAnimation(nullptr);
+}
+
+void Animatable::RemoveAttributeAnimation(const String& name)
+{
+    SetAttributeAnimation(name, nullptr);
+}
+
 ObjectAnimation* Animatable::GetObjectAnimation() const
 {
     return objectAnimation_;
@@ -271,7 +428,7 @@ ObjectAnimation* Animatable::GetObjectAnimation() const
 ValueAnimation* Animatable::GetAttributeAnimation(const String& name) const
 {
     const AttributeAnimationInfo* info = GetAttributeAnimationInfo(name);
-    return info ? info->GetAnimation() : 0;
+    return info ? info->GetAnimation() : nullptr;
 }
 
 WrapMode Animatable::GetAttributeAnimationWrapMode(const String& name) const
@@ -286,11 +443,17 @@ float Animatable::GetAttributeAnimationSpeed(const String& name) const
     return info ? info->GetSpeed() : 1.0f;
 }
 
+float Animatable::GetAttributeAnimationTime(const String& name) const
+{
+    const AttributeAnimationInfo* info = GetAttributeAnimationInfo(name);
+    return info ? info->GetTime() : 0.0f;
+}
+
 void Animatable::SetObjectAnimationAttr(const ResourceRef& value)
 {
     if (!value.name_.Empty())
     {
-        ResourceCache* cache = GetSubsystem<ResourceCache>();
+        auto* cache = GetSubsystem<ResourceCache>();
         SetObjectAnimation(cache->GetResource<ObjectAnimation>(value.name_));
     }
 }
@@ -300,9 +463,19 @@ ResourceRef Animatable::GetObjectAnimationAttr() const
     return GetResourceRef(objectAnimation_, ObjectAnimation::GetTypeStatic());
 }
 
+Animatable* Animatable::FindAttributeAnimationTarget(const String& name, String& outName)
+{
+    // Base implementation only handles self
+    outName = name;
+    return this;
+}
+
 void Animatable::SetObjectAttributeAnimation(const String& name, ValueAnimation* attributeAnimation, WrapMode wrapMode, float speed)
 {
-    SetAttributeAnimation(name, attributeAnimation, wrapMode, speed);
+    String outName;
+    Animatable* target = FindAttributeAnimationTarget(name, outName);
+    if (target)
+        target->SetAttributeAnimation(outName, attributeAnimation, wrapMode, speed);
 }
 
 void Animatable::OnObjectAnimationAdded(ObjectAnimation* objectAnimation)
@@ -312,7 +485,8 @@ void Animatable::OnObjectAnimationAdded(ObjectAnimation* objectAnimation)
 
     // Set all attribute animations from the object animation
     const HashMap<String, SharedPtr<ValueAnimationInfo> >& attributeAnimationInfos = objectAnimation->GetAttributeAnimationInfos();
-    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = attributeAnimationInfos.Begin(); i != attributeAnimationInfos.End(); ++i)
+    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = attributeAnimationInfos.Begin();
+         i != attributeAnimationInfos.End(); ++i)
     {
         const String& name = i->first_;
         ValueAnimationInfo* info = i->second_;
@@ -325,16 +499,10 @@ void Animatable::OnObjectAnimationRemoved(ObjectAnimation* objectAnimation)
     if (!objectAnimation)
         return;
 
-    // Just remove all attribute animations from the object animation
-    Vector<String> names;
-    for (HashMap<String, SharedPtr<AttributeAnimationInfo> >::Iterator i = attributeAnimationInfos_.Begin(); i != attributeAnimationInfos_.End(); ++i)
-    {
-        if (i->second_->GetAnimation()->GetOwner() == objectAnimation)
-            names.Push(i->first_);
-    }
-
-    for (unsigned i = 0; i < names.Size(); ++i)
-        SetObjectAttributeAnimation(names[i], 0, WM_LOOP, 1.0f);
+    // Just remove all attribute animations listed by the object animation
+    const HashMap<String, SharedPtr<ValueAnimationInfo> >& infos = objectAnimation->GetAttributeAnimationInfos();
+    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = infos.Begin(); i != infos.End(); ++i)
+        SetObjectAttributeAnimation(i->first_, nullptr, WM_LOOP, 1.0f);
 }
 
 void Animatable::UpdateAttributeAnimations(float timeStep)
@@ -342,15 +510,24 @@ void Animatable::UpdateAttributeAnimations(float timeStep)
     if (!animationEnabled_)
         return;
 
+    // Keep weak pointer to self to check for destruction caused by event handling
+    WeakPtr<Animatable> self(this);
+
     Vector<String> finishedNames;
-    for (HashMap<String, SharedPtr<AttributeAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin(); i != attributeAnimationInfos_.End(); ++i)
+    for (HashMap<String, SharedPtr<AttributeAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin();
+         i != attributeAnimationInfos_.End(); ++i)
     {
-        if (i->second_->Update(timeStep))
+        bool finished = i->second_->Update(timeStep);
+        // If self deleted as a result of an event sent during animation playback, nothing more to do
+        if (self.Expired())
+            return;
+
+        if (finished)
             finishedNames.Push(i->second_->GetAttributeInfo().name_);
     }
 
     for (unsigned i = 0; i < finishedNames.Size(); ++i)
-        SetAttributeAnimation(finishedNames[i], 0);
+        SetAttributeAnimation(finishedNames[i], nullptr);
 }
 
 bool Animatable::IsAnimatedNetworkAttribute(const AttributeInfo& attrInfo) const
@@ -364,7 +541,7 @@ AttributeAnimationInfo* Animatable::GetAttributeAnimationInfo(const String& name
     if (i != attributeAnimationInfos_.End())
         return i->second_;
 
-    return 0;
+    return nullptr;
 }
 
 void Animatable::HandleAttributeAnimationAdded(StringHash eventType, VariantMap& eventData)
@@ -373,7 +550,7 @@ void Animatable::HandleAttributeAnimationAdded(StringHash eventType, VariantMap&
         return;
 
     using namespace AttributeAnimationAdded;
-    const String& name =eventData[P_ATTRIBUTEANIMATIONNAME].GetString();
+    const String& name = eventData[P_ATTRIBUTEANIMATIONNAME].GetString();
 
     ValueAnimationInfo* info = objectAnimation_->GetAttributeAnimationInfo(name);
     if (!info)
@@ -390,7 +567,7 @@ void Animatable::HandleAttributeAnimationRemoved(StringHash eventType, VariantMa
     using namespace AttributeAnimationRemoved;
     const String& name = eventData[P_ATTRIBUTEANIMATIONNAME].GetString();
 
-    SetObjectAttributeAnimation(name, 0, WM_LOOP, 1.0f);
+    SetObjectAttributeAnimation(name, nullptr, WM_LOOP, 1.0f);
 }
 
 }

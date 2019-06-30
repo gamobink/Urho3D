@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,29 +33,39 @@ class Scene;
 
 struct ComponentReplicationState;
 
+/// Autoremove is used by some components for automatic removal from the scene hierarchy upon completion of an action, for example sound or particle effect.
+enum AutoRemoveMode
+{
+    REMOVE_DISABLED = 0,
+    REMOVE_COMPONENT,
+    REMOVE_NODE
+};
+
 /// Base class for components. Components can be created to scene nodes.
 class URHO3D_API Component : public Animatable
 {
-    OBJECT(Component);
-    BASEOBJECT(Component);
+    URHO3D_OBJECT(Component, Animatable);
 
     friend class Node;
     friend class Scene;
 
 public:
     /// Construct.
-    Component(Context* context);
+    explicit Component(Context* context);
     /// Destruct.
-    virtual ~Component();
+    ~Component() override;
 
     /// Handle enabled/disabled state change.
-    virtual void OnSetEnabled() {}
+    virtual void OnSetEnabled() { }
+
     /// Save as binary data. Return true if successful.
-    virtual bool Save(Serializer& dest) const;
+    bool Save(Serializer& dest) const override;
     /// Save as XML data. Return true if successful.
-    virtual bool SaveXML(XMLElement& dest) const;
+    bool SaveXML(XMLElement& dest) const override;
+    /// Save as JSON data. Return true if successful.
+    bool SaveJSON(JSONValue& dest) const override;
     /// Mark for attribute check on the next network update.
-    virtual void MarkNetworkUpdate();
+    void MarkNetworkUpdate() override;
     /// Return the depended on nodes to order network updates.
     virtual void GetDependencyNodes(PODVector<Node*>& dest);
     /// Visualize the component as debug geometry.
@@ -68,14 +78,20 @@ public:
 
     /// Return ID.
     unsigned GetID() const { return id_; }
+    /// Return whether the component is replicated or local to a scene.
+    bool IsReplicated() const;
+
     /// Return scene node.
     Node* GetNode() const { return node_; }
+
     /// Return the scene the node belongs to.
     Scene* GetScene() const;
+
     /// Return whether is enabled.
     bool IsEnabled() const { return enabled_; }
-    /// Return whether is effectively enabled (node is also enabled.)
+    /// Return whether is effectively enabled (node is also enabled).
     bool IsEnabledEffective() const;
+
     /// Return component in the same scene node by type. If there are several, returns the first.
     Component* GetComponent(StringHash type) const;
     /// Return components in the same scene node by type.
@@ -94,11 +110,13 @@ public:
 
 protected:
     /// Handle attribute animation added.
-    virtual void OnAttributeAnimationAdded();
+    void OnAttributeAnimationAdded() override;
     /// Handle attribute animation removed.
-    virtual void OnAttributeAnimationRemoved();
+    void OnAttributeAnimationRemoved() override;
     /// Handle scene node being assigned at creation.
     virtual void OnNodeSet(Node* node);
+    /// Handle scene being assigned. This may happen several times during the component's lifetime. Scene-wide subsystems and events are subscribed to here.
+    virtual void OnSceneSet(Scene* scene);
     /// Handle scene node transform dirtied.
     virtual void OnMarkedDirty(Node* node);
     /// Handle scene node enabled status changing.
@@ -109,6 +127,10 @@ protected:
     void SetNode(Node* node);
     /// Handle scene attribute animation update event.
     void HandleAttributeAnimationUpdate(StringHash eventType, VariantMap& eventData);
+    /// Return a component from the scene root that sends out fixed update events (either PhysicsWorld or PhysicsWorld2D). Return null if neither exists.
+    Component* GetFixedUpdateSource();
+    /// Perform autoremove. Called by subclasses. Caller should keep a weak pointer to itself to check whether was actually removed, and return immediately without further member operations in that case.
+    void DoAutoRemove(AutoRemoveMode mode);
 
     /// Scene node.
     Node* node_;
@@ -121,6 +143,10 @@ protected:
 };
 
 template <class T> T* Component::GetComponent() const { return static_cast<T*>(GetComponent(T::GetTypeStatic())); }
-template <class T> void Component::GetComponents(PODVector<T*>& dest) const { GetComponents(reinterpret_cast<PODVector<Component*>&>(dest), T::GetTypeStatic()); }
+
+template <class T> void Component::GetComponents(PODVector<T*>& dest) const
+{
+    GetComponents(reinterpret_cast<PODVector<Component*>&>(dest), T::GetTypeStatic());
+}
 
 }

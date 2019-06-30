@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,8 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../Input/InputEvents.h"
 #include "../IO/Log.h"
@@ -35,7 +37,7 @@ const char* orientations[] =
 {
     "Horizontal",
     "Vertical",
-    0
+    nullptr
 };
 
 extern const char* UI_CATEGORY;
@@ -55,20 +57,18 @@ Slider::Slider(Context* context) :
     UpdateSlider();
 }
 
-Slider::~Slider()
-{
-}
+Slider::~Slider() = default;
 
 void Slider::RegisterObject(Context* context)
 {
     context->RegisterFactory<Slider>(UI_CATEGORY);
 
-    COPY_BASE_ATTRIBUTES(BorderImage);
-    UPDATE_ATTRIBUTE_DEFAULT_VALUE("Is Enabled", true);
-    ENUM_ACCESSOR_ATTRIBUTE("Orientation", GetOrientation, SetOrientation, Orientation, orientations, O_HORIZONTAL, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Range", GetRange, SetRange, float, 1.0f, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Value", GetValue, SetValue, float, 0.0f, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Repeat Rate", GetRepeatRate, SetRepeatRate, float, 0.0f, AM_FILE);
+    URHO3D_COPY_BASE_ATTRIBUTES(BorderImage);
+    URHO3D_UPDATE_ATTRIBUTE_DEFAULT_VALUE("Is Enabled", true);
+    URHO3D_ENUM_ACCESSOR_ATTRIBUTE("Orientation", GetOrientation, SetOrientation, Orientation, orientations, O_HORIZONTAL, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Range", GetRange, SetRange, float, 1.0f, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Value", GetValue, SetValue, float, 0.0f, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Repeat Rate", GetRepeatRate, SetRepeatRate, float, 0.0f, AM_FILE);
 }
 
 void Slider::Update(float timeStep)
@@ -90,10 +90,11 @@ void Slider::OnHover(const IntVector2& position, const IntVector2& screenPositio
 
     // If not hovering on the knob, send it as page event
     if (!hovering_)
-        Page(position, buttons & MOUSEB_LEFT);
+        Page(position, (bool)(buttons & MOUSEB_LEFT));
 }
 
-void Slider::OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor)
+void Slider::OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers,
+    Cursor* cursor)
 {
     selected_ = true;
     hovering_ = knob_->IsInside(screenPosition, true);
@@ -101,7 +102,8 @@ void Slider::OnClickBegin(const IntVector2& position, const IntVector2& screenPo
         Page(position, true);
 }
 
-void Slider::OnClickEnd(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor, UIElement* beginElement)
+void Slider::OnClickEnd(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers,
+    Cursor* cursor, UIElement* beginElement)
 {
     hovering_ = knob_->IsInside(screenPosition, true);
     if (!hovering_ && button == MOUSEB_LEFT)
@@ -120,12 +122,13 @@ void Slider::OnDragBegin(const IntVector2& position, const IntVector2& screenPos
     }
 }
 
-void Slider::OnDragMove(const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons, int qualifiers, Cursor* cursor)
+void Slider::OnDragMove(const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons,
+    int qualifiers, Cursor* cursor)
 {
     if (!editable_ || !dragSlider_ || GetSize() == knob_->GetSize())
         return;
 
-    float newValue = value_;
+    float newValue;
     IntVector2 delta = position - dragBeginCursor_;
 
     if (orientation_ == O_HORIZONTAL)
@@ -155,14 +158,14 @@ void Slider::OnDragEnd(const IntVector2& position, const IntVector2& screenPosit
     }
 }
 
-void Slider::OnResize()
+void Slider::OnResize(const IntVector2& newSize, const IntVector2& delta)
 {
     UpdateSlider();
 }
 
-void Slider::SetOrientation(Orientation type)
+void Slider::SetOrientation(Orientation orientation)
 {
-    orientation_ = type;
+    orientation_ = orientation;
     UpdateSlider();
 }
 
@@ -229,22 +232,44 @@ void Slider::UpdateSlider()
     {
         if (orientation_ == O_HORIZONTAL)
         {
-            int sliderLength = (int)Max((float)GetWidth() / (range_ + 1.0f), (float)(border.left_ + border.right_));
+            auto sliderLength = (int)Max((float)GetWidth() / (range_ + 1.0f), (float)(border.left_ + border.right_));
+
+            if (knob_->IsFixedWidth())
+                sliderLength = knob_->GetWidth();
+
             float sliderPos = (float)(GetWidth() - sliderLength) * value_ / range_;
-            knob_->SetSize(sliderLength, GetHeight());
-            knob_->SetPosition(Clamp((int)(sliderPos + 0.5f), 0, GetWidth() - knob_->GetWidth()), 0);
+
+            if (!knob_->IsFixedSize())
+            {
+                knob_->SetSize(sliderLength, GetHeight());
+                knob_->SetPosition(Clamp(RoundToInt(sliderPos), 0, GetWidth() - knob_->GetWidth()), 0);
+            }
+            else
+                knob_->SetPosition(Clamp((int)(sliderPos), 0, GetWidth() - knob_->GetWidth()), 0);
         }
         else
         {
-            int sliderLength = (int)Max((float)GetHeight() / (range_ + 1.0f), (float)(border.top_ + border.bottom_));
+            auto sliderLength = (int)Max((float)GetHeight() / (range_ + 1.0f), (float)(border.top_ + border.bottom_));
+
+            if (knob_->IsFixedHeight())
+                sliderLength = knob_->GetHeight();
+
             float sliderPos = (float)(GetHeight() - sliderLength) * value_ / range_;
-            knob_->SetSize(GetWidth(), sliderLength);
-            knob_->SetPosition(0, Clamp((int)(sliderPos + 0.5f), 0, GetHeight() - knob_->GetHeight()));
+
+            if (!knob_->IsFixedSize())
+            {
+                knob_->SetSize(GetWidth(), sliderLength);
+                knob_->SetPosition(0, Clamp(RoundToInt(sliderPos), 0, GetHeight() - knob_->GetHeight()));
+            }
+            else
+                knob_->SetPosition(0, Clamp(RoundToInt(sliderPos), 0, GetHeight() - knob_->GetHeight()));
         }
     }
     else
     {
-        knob_->SetSize(GetSize());
+        if (!knob_->IsFixedSize())
+            knob_->SetSize(GetSize());
+
         knob_->SetPosition(0, 0);
     }
 }
@@ -256,7 +281,7 @@ void Slider::Page(const IntVector2& position, bool pressed)
 
     IntVector2 offsetXY = position - knob_->GetPosition() - knob_->GetSize() / 2;
     int offset = orientation_ == O_HORIZONTAL ? offsetXY.x_ : offsetXY.y_;
-    float length = (float)(orientation_ == O_HORIZONTAL ? GetWidth() : GetHeight());
+    auto length = (float)(orientation_ == O_HORIZONTAL ? GetWidth() : GetHeight());
 
     using namespace SliderPaged;
 
@@ -265,7 +290,8 @@ void Slider::Page(const IntVector2& position, bool pressed)
     eventData[P_OFFSET] = offset;
 
     // Start transmitting repeated pages after the initial press
-    if (selected_ && pressed && repeatRate_ > 0.0f && repeatTimer_.GetMSec(false) >= Lerp(1000.0f / repeatRate_, 0, Abs(offset) / length))
+    if (selected_ && pressed && repeatRate_ > 0.0f &&
+        repeatTimer_.GetMSec(false) >= Lerp(1000.0f / repeatRate_, 0.0f, Abs(offset) / length))
         repeatTimer_.Reset();
     else
         pressed = false;

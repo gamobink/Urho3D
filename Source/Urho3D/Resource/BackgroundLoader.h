@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,8 @@
 #include "../Core/Mutex.h"
 #include "../Container/Ptr.h"
 #include "../Container/RefCounted.h"
-#include "../Math/StringHash.h"
 #include "../Core/Thread.h"
+#include "../Math/StringHash.h"
 
 namespace Urho3D
 {
@@ -54,25 +54,28 @@ class BackgroundLoader : public RefCounted, public Thread
 {
 public:
     /// Construct.
-    BackgroundLoader(ResourceCache* owner);
-    
+    explicit BackgroundLoader(ResourceCache* owner);
+
+    /// Destruct. Forcibly clear the load queue.
+    ~BackgroundLoader() override;
+
     /// Resource background loading loop.
-    virtual void ThreadFunction();
-    
+    void ThreadFunction() override;
+
     /// Queue loading of a resource. The name must be sanitated to ensure consistent format. Return true if queued (not a duplicate and resource was a known type).
     bool QueueResource(StringHash type, const String& name, bool sendEventOnFailure, Resource* caller);
     /// Wait and finish possible loading of a resource when being requested from the cache.
     void WaitForResource(StringHash type, StringHash nameHash);
     /// Process resources that are ready to finish.
     void FinishResources(int maxMs);
-    
+
     /// Return amount of resources in the load queue.
     unsigned GetNumQueuedResources() const;
-    
+
 private:
     /// Finish one background loaded resource.
     void FinishBackgroundLoading(BackgroundLoadItem& item);
-    
+
     /// Resource cache.
     ResourceCache* owner_;
     /// Mutex for thread-safe access to the background load queue.

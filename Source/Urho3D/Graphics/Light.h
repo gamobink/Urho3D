@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,23 +45,22 @@ static const float SHADOW_MIN_QUANTIZE = 0.1f;
 static const float SHADOW_MIN_VIEW = 1.0f;
 static const int MAX_LIGHT_SPLITS = 6;
 #ifdef DESKTOP_GRAPHICS
-static const int MAX_CASCADE_SPLITS = 4;
+static const unsigned MAX_CASCADE_SPLITS = 4;
 #else
-static const int MAX_CASCADE_SPLITS = 1;
+static const unsigned MAX_CASCADE_SPLITS = 1;
 #endif
 
-/// Shadow depth bias parameters.
+/// Depth bias parameters. Used both by lights (for shadow mapping) and materials.
 struct URHO3D_API BiasParameters
 {
     /// Construct undefined.
-    BiasParameters()
-    {
-    }
+    BiasParameters() = default;
 
     /// Construct with initial values.
-    BiasParameters(float constantBias, float slopeScaledBias) :
+    BiasParameters(float constantBias, float slopeScaledBias, float normalOffset = 0.0f) :
         constantBias_(constantBias),
-        slopeScaledBias_(slopeScaledBias)
+        slopeScaledBias_(slopeScaledBias),
+        normalOffset_(normalOffset)
     {
     }
 
@@ -72,15 +71,15 @@ struct URHO3D_API BiasParameters
     float constantBias_;
     /// Slope scaled bias.
     float slopeScaledBias_;
+    /// Normal offset multiplier.
+    float normalOffset_;
 };
 
 /// Cascaded shadow map parameters.
 struct URHO3D_API CascadeParameters
 {
     /// Construct undefined.
-    CascadeParameters()
-    {
-    }
+    CascadeParameters() = default;
 
     /// Construct with initial values.
     CascadeParameters(float split1, float split2, float split3, float split4, float fadeStart, float biasAutoAdjust = 1.0f) :
@@ -107,20 +106,18 @@ struct URHO3D_API CascadeParameters
     }
 
     /// Far clip values of the splits.
-    float splits_[4];
+    Vector4 splits_;
     /// The point relative to the total shadow range where shadow fade begins (0.0 - 1.0)
-    float fadeStart_;
+    float fadeStart_{};
     /// Automatic depth bias adjustment strength.
-    float biasAutoAdjust_;
+    float biasAutoAdjust_{};
 };
 
 /// Shadow map focusing parameters.
 struct URHO3D_API FocusParameters
 {
     /// Construct undefined.
-    FocusParameters()
-    {
-    }
+    FocusParameters() = default;
 
     /// Construct with initial values.
     FocusParameters(bool focus, bool nonUniform, bool autoSize, float quantize, float minView) :
@@ -150,24 +147,22 @@ struct URHO3D_API FocusParameters
 /// %Light component.
 class URHO3D_API Light : public Drawable
 {
-    OBJECT(Light);
+    URHO3D_OBJECT(Light, Drawable);
 
 public:
     /// Construct.
-    Light(Context* context);
+    explicit Light(Context* context);
     /// Destruct.
-    virtual ~Light();
+    ~Light() override;
     /// Register object factory. Drawable must be registered first.
     static void RegisterObject(Context* context);
 
-    /// Handle attribute change.
-    virtual void OnSetAttribute(const AttributeInfo& attr, const Variant& src);
     /// Process octree raycast. May be called from a worker thread.
-    virtual void ProcessRayQuery(const RayOctreeQuery& query, PODVector<RayQueryResult>& results);
+    void ProcessRayQuery(const RayOctreeQuery& query, PODVector<RayQueryResult>& results) override;
     /// Calculate distance and prepare batches for rendering. May be called from worker thread(s), possibly re-entrantly.
-    virtual void UpdateBatches(const FrameInfo& frame);
+    void UpdateBatches(const FrameInfo& frame) override;
     /// Visualize the component as debug geometry.
-    virtual void DrawDebugGeometry(DebugRenderer* debug, bool depthTest);
+    void DrawDebugGeometry(DebugRenderer* debug, bool depthTest) override;
 
     /// Set light type.
     void SetLightType(LightType type);
@@ -175,9 +170,17 @@ public:
     void SetPerVertex(bool enable);
     /// Set color.
     void SetColor(const Color& color);
+    /// Set temperature of the light in Kelvin. Modulates the light color when "use physical values" is enabled.
+    void SetTemperature(float temperature);
+    /// Set area light radius. Greater than zero activates area light mode. Works only with PBR shaders.
+    void SetRadius(float radius);
+    /// Set tube area light length. Works only with PBR shaders.
+    void SetLength(float length);
+    /// Set use physical light values.
+    void SetUsePhysicalValues(bool enable);
     /// Set specular intensity. Zero disables specular calculations.
     void SetSpecularIntensity(float intensity);
-    /// Set light brightness multiplier. Both the color and specular intensity are multiplied with this to get final values for rendering.
+    /// Set light brightness multiplier. Both the color and specular intensity are multiplied with this. When "use physical values" is enabled, the value is specified in lumens.
     void SetBrightness(float brightness);
     /// Set range.
     void SetRange(float range);
@@ -195,12 +198,14 @@ public:
     void SetShadowCascade(const CascadeParameters& parameters);
     /// Set shadow map focusing parameters.
     void SetShadowFocus(const FocusParameters& parameters);
-    /// Set shadow intensity between 0.0 - 1.0. 0.0 (the default) gives fully dark shadows.
+    /// Set light intensity in shadow between 0.0 - 1.0. 0.0 (the default) gives fully dark shadows.
     void SetShadowIntensity(float intensity);
     /// Set shadow resolution between 0.25 - 1.0. Determines the shadow map to use.
     void SetShadowResolution(float resolution);
-    /// Set shadow camera near/far clip distance ratio.
+    /// Set shadow camera near/far clip distance ratio for spot and point lights. Does not affect directional lights, since they are orthographic and have near clip 0.
     void SetShadowNearFarRatio(float nearFarRatio);
+    /// Set maximum shadow extrusion for directional lights. The actual extrusion will be the smaller of this and camera far clip. Default 1000.
+    void SetShadowMaxExtrusion(float extrusion);
     /// Set range attenuation texture.
     void SetRampTexture(Texture* texture);
     /// Set spotlight attenuation texture.
@@ -208,48 +213,90 @@ public:
 
     /// Return light type.
     LightType GetLightType() const { return lightType_; }
+
     /// Return vertex lighting mode.
     bool GetPerVertex() const { return perVertex_; }
+
     /// Return color.
     const Color& GetColor() const { return color_; }
+
+    /// Return the temperature of the light in Kelvin.
+    float GetTemperature() const { return temperature_; }
+
+    /// Return area light mode radius. Works only with PBR shaders.
+    float GetRadius() const { return lightRad_; }
+
+    /// Return area tube light length. Works only with PBR shaders.
+    float GetLength() const { return lightLength_; }
+
+    /// Return if light uses temperature and brightness in lumens.
+    bool GetUsePhysicalValues() const { return usePhysicalValues_; }
+
+    /// Return the color value of the temperature in Kelvin.
+    Color GetColorFromTemperature() const;
+
     /// Return specular intensity.
     float GetSpecularIntensity() const { return specularIntensity_; }
-    /// Return brightness multiplier.
+
+    /// Return brightness multiplier. Specified in lumens when "use physical values" is enabled.
     float GetBrightness() const { return brightness_; }
-    /// Return effective color, multiplied by brightness. Do not multiply the alpha so that can compare against the default black color to detect a light with no effect.
-    Color GetEffectiveColor() const { return Color(color_ * brightness_, 1.0f); }
+
+    /// Return effective color, multiplied by brightness and affected by temperature when "use physical values" is enabled. Alpha is always 1 so that can compare against the default black color to detect a light with no effect.
+    Color GetEffectiveColor() const;
+
     /// Return effective specular intensity, multiplied by absolute value of brightness.
     float GetEffectiveSpecularIntensity() const { return specularIntensity_ * Abs(brightness_); }
+
     /// Return range.
     float GetRange() const { return range_; }
+
     /// Return spotlight field of view.
     float GetFov() const { return fov_; }
+
     /// Return spotlight aspect ratio.
     float GetAspectRatio() const { return aspectRatio_; }
+
     /// Return fade start distance.
     float GetFadeDistance() const { return fadeDistance_; }
+
     /// Return shadow fade start distance.
     float GetShadowFadeDistance() const { return shadowFadeDistance_; }
+
     /// Return shadow depth bias parameters.
     const BiasParameters& GetShadowBias() const { return shadowBias_; }
+
     /// Return directional light cascaded shadow parameters.
     const CascadeParameters& GetShadowCascade() const { return shadowCascade_; }
+
     /// Return shadow map focus parameters.
     const FocusParameters& GetShadowFocus() const { return shadowFocus_; }
-    /// Return shadow intensity.
+
+    /// Return light intensity in shadow.
     float GetShadowIntensity() const { return shadowIntensity_; }
+
     /// Return shadow resolution.
     float GetShadowResolution() const { return shadowResolution_; }
+
     /// Return shadow camera near/far clip distance ratio.
     float GetShadowNearFarRatio() const { return shadowNearFarRatio_; }
+
+    /// Return maximum shadow extrusion distance for directional lights.
+    float GetShadowMaxExtrusion() const { return shadowMaxExtrusion_; }
+
     /// Return range attenuation texture.
     Texture* GetRampTexture() const { return rampTexture_; }
+
     /// Return spotlight attenuation texture.
     Texture* GetShapeTexture() const { return shapeTexture_; }
+
     /// Return spotlight frustum.
     Frustum GetFrustum() const;
+    /// Return spotlight frustum in the specified view space.
+    Frustum GetViewSpaceFrustum(const Matrix3x4& view) const;
+
     /// Return number of shadow map cascade splits for a directional light, considering also graphics API limitations.
     int GetNumShadowSplits() const;
+
     /// Return whether light has negative (darkening) color.
     bool IsNegative() const { return GetEffectiveColor().SumRGB() < 0.0f; }
 
@@ -261,10 +308,15 @@ public:
     void SetLightQueue(LightBatchQueue* queue);
     /// Return light volume model transform.
     const Matrix3x4& GetVolumeTransform(Camera* camera);
+
     /// Return light queue. Called by View.
     LightBatchQueue* GetLightQueue() const { return lightQueue_; }
+
     /// Return a divisor value based on intensity for calculating the sort value.
-    float GetIntensityDivisor(float attenuation = 1.0f) const { return Max(GetEffectiveColor().SumRGB(), 0.0f) * attenuation + M_EPSILON; }
+    float GetIntensityDivisor(float attenuation = 1.0f) const
+    {
+        return Max(GetEffectiveColor().SumRGB(), 0.0f) * attenuation + M_EPSILON;
+    }
 
     /// Set ramp texture attribute.
     void SetRampTextureAttr(const ResourceRef& value);
@@ -275,15 +327,30 @@ public:
     /// Return shape texture attribute.
     ResourceRef GetShapeTextureAttr() const;
 
+    /// Return a transform for deferred fullscreen quad (directional light) rendering.
+    static Matrix3x4 GetFullscreenQuadTransform(Camera* camera);
+
 protected:
     /// Recalculate the world-space bounding box.
-    virtual void OnWorldBoundingBoxUpdate();
+    void OnWorldBoundingBoxUpdate() override;
 
 private:
+    /// Validate shadow focus.
+    void ValidateShadowFocus() { shadowFocus_.Validate(); }
+    /// Validate shadow cascade.
+    void ValidateShadowCascade() { shadowCascade_.Validate(); }
+    /// Validate shadow bias.
+    void ValidateShadowBias() { shadowBias_.Validate(); }
     /// Light type.
     LightType lightType_;
     /// Color.
     Color color_;
+    /// Light temperature.
+    float temperature_;
+    /// Radius of the light source. If above 0 it will turn the light into an area light.  Works only with PBR shaders.
+    float lightRad_;
+    /// Length of the light source. If above 0 and radius is above 0 it will create a tube light. Works only with PBR shaders.
+    float lightLength_;
     /// Shadow depth bias parameters.
     BiasParameters shadowBias_;
     /// Directional light cascaded shadow parameters.
@@ -312,14 +379,18 @@ private:
     float fadeDistance_;
     /// Shadow fade start distance.
     float shadowFadeDistance_;
-    /// Shadow intensity.
+    /// Light intensity in shadow.
     float shadowIntensity_;
     /// Shadow resolution.
     float shadowResolution_;
     /// Shadow camera near/far clip distance ratio.
     float shadowNearFarRatio_;
+    /// Directional shadow max. extrusion distance.
+    float shadowMaxExtrusion_;
     /// Per-vertex lighting flag.
     bool perVertex_;
+    /// Use physical light values flag.
+    bool usePhysicalValues_;
 };
 
 inline bool CompareLights(Light* lhs, Light* rhs)

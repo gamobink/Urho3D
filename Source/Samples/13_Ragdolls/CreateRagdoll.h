@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,16 +30,16 @@ using namespace Urho3D;
 /// Custom component that creates a ragdoll upon collision.
 class CreateRagdoll : public Component
 {
-    OBJECT(CreateRagdoll);
-    
+    URHO3D_OBJECT(CreateRagdoll, Component);
+
 public:
     /// Construct.
-    CreateRagdoll(Context* context);
-    
+    explicit CreateRagdoll(Context* context);
+
 protected:
     /// Handle node being assigned.
-    virtual void OnNodeSet(Node* node);
-    
+    void OnNodeSet(Node* node) override;
+
 private:
     /// Handle scene node's physics collision.
     void HandleNodeCollision(StringHash eventType, VariantMap& eventData);

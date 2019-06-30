@@ -12,6 +12,11 @@ require "LuaScripts/Utilities/Sample"
 local endPos = nil
 local currentPath = {}
 
+local useStreaming = false
+local streamingDistance = 2
+local navigationTiles = {}
+local addedTiles = {}
+
 function Start()
     -- Execute the common startup for samples
     SampleStart()
@@ -24,6 +29,9 @@ function Start()
 
     -- Setup the viewport for displaying the scene
     SetupViewport()
+
+    -- Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_RELATIVE)
 
     -- Hook up to the frame update and render post-update events
     SubscribeToEvents()
@@ -95,6 +103,8 @@ function CreateScene()
 
     -- Create a NavigationMesh component to the scene root
     local navMesh = scene_:CreateComponent("NavigationMesh")
+    -- Set small tiles to show navigation mesh streaming
+    navMesh.tileSize = 32
     -- Create a Navigable component to the scene root. This tags all of the geometry in the scene as being part of the
     -- navigation mesh. By default this is recursive, but the recursion could be turned off from Navigable
     scene_:CreateComponent("Navigable")
@@ -111,8 +121,10 @@ function CreateScene()
     local camera = cameraNode:CreateComponent("Camera")
     camera.farClip = 300.0
 
-    -- Set an initial position for the camera scene node above the plane
-    cameraNode.position = Vector3(0.0, 5.0, 0.0)
+    -- Set an initial position for the camera scene node above the plane and looking down
+    cameraNode.position = Vector3(0.0, 50.0, 0.0)
+    pitch = 80.0
+    cameraNode.rotation = Quaternion(pitch, yaw, 0.0)
 end
 
 function CreateUI()
@@ -129,7 +141,8 @@ function CreateUI()
     local instructionText = ui.root:CreateChild("Text")
     instructionText.text = "Use WASD keys to move, RMB to rotate view\n"..
         "LMB to set destination, SHIFT+LMB to teleport\n"..
-        "MMB to add or remove obstacles\n"..
+        "MMB or O key to add or remove obstacles\n"..
+        "Tab to toggle navigation mesh streaming\n"..
         "Space to toggle debug geometry"
     instructionText:SetFont(cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
     -- The text has multiple rows. Center them in relation to each other
@@ -157,8 +170,14 @@ function SubscribeToEvents()
 end
 
 function MoveCamera(timeStep)
+    input.mouseVisible = input.mouseMode ~= MM_RELATIVE
+    mouseDown = input:GetMouseButtonDown(MOUSEB_RIGHT)
+
+    -- Override the MM_RELATIVE mouse grabbed settings, to allow interaction with UI
+    input.mouseGrabbed = mouseDown
+
     -- Right mouse button controls mouse cursor visibility: hide when pressed
-    ui.cursor.visible = not input:GetMouseButtonDown(MOUSEB_RIGHT)
+    ui.cursor.visible = not mouseDown
 
     -- Do not move if the UI has a focused element (the console)
     if ui.focusElement ~= nil then
@@ -200,7 +219,7 @@ function MoveCamera(timeStep)
         SetPathPoint()
     end
     -- Add or remove objects with middle mouse button, then rebuild navigation mesh partially
-    if input:GetMouseButtonPress(MOUSEB_MIDDLE) then
+    if input:GetMouseButtonPress(MOUSEB_MIDDLE) or input:GetKeyPress(KEY_O) then
         AddOrRemoveObject()
     end
     -- Toggle debug geometry with space
@@ -210,9 +229,9 @@ function MoveCamera(timeStep)
 end
 
 function SetPathPoint()
-    local result, hitPos, hitDrawable = Raycast(250.0)
+    local hitPos, hitDrawable = Raycast(250.0)
     local navMesh = scene_:GetComponent("NavigationMesh")
-    if result then
+    if hitPos then
         local pathPos = navMesh:FindNearestPoint(hitPos, Vector3.ONE)
 
         if input:GetQualifierDown(QUAL_SHIFT) then
@@ -230,13 +249,13 @@ end
 
 function AddOrRemoveObject()
     -- Raycast and check if we hit a mushroom node. If yes, remove it, if no, create a new one
-    local result, hitPos, hitDrawable = Raycast(250.0)
-    if result then
+    local hitPos, hitDrawable = Raycast(250.0)
+    if not useStreaming and hitDrawable then
         -- The part of the navigation mesh we must update, which is the world bounding box of the associated
         -- drawable component
         local updateBox = nil
 
-        local hitNode = hitDrawable:GetNode()
+        local hitNode = hitDrawable.node
         if hitNode.name == "Mushroom" then
             updateBox = hitDrawable.worldBoundingBox
             hitNode:Remove()
@@ -268,13 +287,11 @@ function CreateMushroom(pos)
 end
 
 function Raycast(maxDistance)
-    local hitPos = nil
-    local hitDrawable = nil
 
     local pos = ui.cursorPosition
     -- Check the cursor is visible and there is no UI element in front of the cursor
     if (not ui.cursor.visible) or (ui:GetElementAt(pos, true) ~= nil) then
-        return false, nil, nil
+        return nil, nil
     end
 
     local camera = cameraNode:GetComponent("Camera")
@@ -283,24 +300,85 @@ function Raycast(maxDistance)
     local octree = scene_:GetComponent("Octree")
     local result = octree:RaycastSingle(cameraRay, RAY_TRIANGLE, maxDistance, DRAWABLE_GEOMETRY)
     if result.drawable ~= nil then
-        -- Calculate hit position in world space
-        hitPos = cameraRay.origin + cameraRay.direction * result.distance
-        hitDrawable = result.drawable
-        return true, hitPos, hitDrawable
+        return result.position, result.drawable
     end
 
-    return false, nil, nil
+    return nil, nil
+end
+
+function ToggleStreaming(enabled)
+    local navMesh = scene_:GetComponent("NavigationMesh")
+    if enabled then
+        local maxTiles = (2 * streamingDistance + 1) * (2 * streamingDistance + 1)
+        local boundingBox = BoundingBox(navMesh.boundingBox)
+        SaveNavigationData()
+        navMesh:Allocate(boundingBox, maxTiles)
+    else
+        navMesh:Build()
+    end
+end
+
+function UpdateStreaming()
+    local navMesh = scene_:GetComponent("NavigationMesh")
+
+    -- Center the navigation mesh at the jack
+    local jackTile = navMesh:GetTileIndex(jackNode.worldPosition)
+    local beginTile = VectorMax(IntVector2(0, 0), jackTile - IntVector2(1, 1) * streamingDistance)
+    local endTile = VectorMin(jackTile + IntVector2(1, 1) * streamingDistance, navMesh.numTiles - IntVector2(1, 1))
+
+    -- Remove tiles
+    local numTiles = navMesh.numTiles
+    for i,tileIdx in pairs(addedTiles) do
+        if not (beginTile.x <= tileIdx.x and tileIdx.x <= endTile.x and beginTile.y <= tileIdx.y and tileIdx.y <= endTile.y) then
+            addedTiles[i] = nil
+            navMesh:RemoveTile(tileIdx)
+        end
+    end
+
+    -- Add tiles
+    for z = beginTile.y, endTile.y do
+        for x = beginTile.x, endTile.x do
+            local i = z * numTiles.x + x
+            if not navMesh:HasTile(IntVector2(x, z)) and navigationTiles[i] then
+                addedTiles[i] = IntVector2(x, z)
+                navMesh:AddTile(navigationTiles[i])
+            end
+        end
+    end
+end
+
+function SaveNavigationData()
+    local navMesh = scene_:GetComponent("NavigationMesh")
+    navigationTiles = {}
+    addedTiles = {}
+    local numTiles = navMesh.numTiles
+
+    for z = 0, numTiles.y - 1 do
+        for x = 0, numTiles.x - 1 do
+            local i = z * numTiles.x + x
+            navigationTiles[i] = navMesh:GetTileData(IntVector2(x, z))
+        end
+    end
 end
 
 function HandleUpdate(eventType, eventData)
     -- Take the frame time step, which is stored as a float
-    local timeStep = eventData:GetFloat("TimeStep")
+    local timeStep = eventData["TimeStep"]:GetFloat()
 
     -- Move the camera, scale movement with time step
     MoveCamera(timeStep)
 
     -- Make Jack follow the Detour path
     FollowPath(timeStep)
+
+    -- Update streaming
+    if input:GetKeyPress(KEY_TAB) then
+        useStreaming = not useStreaming
+        ToggleStreaming(useStreaming)
+    end
+    if useStreaming then
+        UpdateStreaming()
+    end
 end
 
 function FollowPath(timeStep)

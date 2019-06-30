@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,13 +30,13 @@ namespace Urho3D
 /// 2D motor constraint component.
 class URHO3D_API ConstraintMotor2D : public Constraint2D
 {
-    OBJECT(ConstraintMotor2D);
+    URHO3D_OBJECT(ConstraintMotor2D, Constraint2D);
 
 public:
     /// Construct.
-    ConstraintMotor2D(Context* scontext);
+    explicit ConstraintMotor2D(Context* context);
     /// Destruct.
-    virtual ~ConstraintMotor2D();
+    ~ConstraintMotor2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
@@ -53,18 +53,22 @@ public:
 
     /// Return linear offset.
     const Vector2& GetLinearOffset() const { return linearOffset_; }
+
     /// Return angular offset.
     float GetAngularOffset() const { return jointDef_.angularOffset; }
+
     /// Return max force.
     float GetMaxForce() const { return jointDef_.maxForce; }
+
     /// Return max torque.
     float GetMaxTorque() const { return jointDef_.maxTorque; }
+
     /// Return correction factor.
     float GetCorrectionFactor() const { return jointDef_.correctionFactor; }
 
 private:
     /// Return joint def.
-    virtual b2JointDef* GetJointDef();
+    b2JointDef* GetJointDef() override;
 
     /// Box2D joint def.
     b2MotorJointDef jointDef_;

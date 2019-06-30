@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,14 +20,17 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
+#include "../Core/Context.h"
+#include "../Core/Profiler.h"
 #include "../Graphics/AnimatedModel.h"
 #include "../Graphics/Animation.h"
 #include "../Graphics/AnimationController.h"
 #include "../Graphics/AnimationState.h"
-#include "../Core/Context.h"
+#include "../IO/FileSystem.h"
 #include "../IO/Log.h"
 #include "../IO/MemoryBuffer.h"
-#include "../Core/Profiler.h"
 #include "../Resource/ResourceCache.h"
 #include "../Scene/Scene.h"
 #include "../Scene/SceneEvents.h"
@@ -42,6 +45,8 @@ static const unsigned char CTRL_STARTBONE = 0x2;
 static const unsigned char CTRL_AUTOFADE = 0x4;
 static const unsigned char CTRL_SETTIME = 0x08;
 static const unsigned char CTRL_SETWEIGHT = 0x10;
+static const unsigned char CTRL_REMOVEONCOMPLETION = 0x20;
+static const unsigned char CTRL_ADDITIVE = 0x40;
 static const float EXTRA_ANIM_FADEOUT_TIME = 0.1f;
 static const float COMMAND_STAY_TIME = 0.25f;
 static const unsigned MAX_NODE_ANIMATION_STATES = 256;
@@ -53,18 +58,19 @@ AnimationController::AnimationController(Context* context) :
 {
 }
 
-AnimationController::~AnimationController()
-{
-}
+AnimationController::~AnimationController() = default;
 
 void AnimationController::RegisterObject(Context* context)
 {
     context->RegisterFactory<AnimationController>(LOGIC_CATEGORY);
 
-    ACCESSOR_ATTRIBUTE("Is Enabled", IsEnabled, SetEnabled, bool, true, AM_DEFAULT);
-    MIXED_ACCESSOR_ATTRIBUTE("Animations", GetAnimationsAttr, SetAnimationsAttr, VariantVector, Variant::emptyVariantVector, AM_FILE | AM_NOEDIT);
-    ACCESSOR_ATTRIBUTE("Network Animations", GetNetAnimationsAttr, SetNetAnimationsAttr, PODVector<unsigned char>, Variant::emptyBuffer, AM_NET | AM_LATESTDATA | AM_NOEDIT);
-    MIXED_ACCESSOR_ATTRIBUTE("Node Animation States", GetNodeAnimationStatesAttr, SetNodeAnimationStatesAttr, VariantVector, Variant::emptyVariantVector, AM_FILE | AM_NOEDIT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Is Enabled", IsEnabled, SetEnabled, bool, true, AM_DEFAULT);
+    URHO3D_MIXED_ACCESSOR_ATTRIBUTE("Animations", GetAnimationsAttr, SetAnimationsAttr, VariantVector, Variant::emptyVariantVector,
+        AM_FILE | AM_NOEDIT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Network Animations", GetNetAnimationsAttr, SetNetAnimationsAttr, PODVector<unsigned char>,
+        Variant::emptyBuffer, AM_NET | AM_LATESTDATA | AM_NOEDIT);
+    URHO3D_MIXED_ACCESSOR_ATTRIBUTE("Node Animation States", GetNodeAnimationStatesAttr, SetNodeAnimationStatesAttr, VariantVector,
+        Variant::emptyVariantVector, AM_FILE | AM_NOEDIT);
 }
 
 void AnimationController::OnSetEnabled()
@@ -73,7 +79,7 @@ void AnimationController::OnSetEnabled()
     if (scene)
     {
         if (IsEnabledEffective())
-            SubscribeToEvent(scene, E_SCENEPOSTUPDATE, HANDLER(AnimationController, HandleScenePostUpdate));
+            SubscribeToEvent(scene, E_SCENEPOSTUPDATE, URHO3D_HANDLER(AnimationController, HandleScenePostUpdate));
         else
             UnsubscribeFromEvent(scene, E_SCENEPOSTUPDATE);
     }
@@ -82,26 +88,28 @@ void AnimationController::OnSetEnabled()
 void AnimationController::Update(float timeStep)
 {
     // Loop through animations
-    for (Vector<AnimationControl>::Iterator i = animations_.Begin(); i != animations_.End();)
+    for (unsigned i = 0; i < animations_.Size();)
     {
+        AnimationControl& ctrl = animations_[i];
+        AnimationState* state = GetAnimationState(ctrl.hash_);
         bool remove = false;
-        AnimationState* state = GetAnimationState(i->hash_);
+
         if (!state)
             remove = true;
         else
         {
             // Advance the animation
-            if (i->speed_ != 0.0f)
-                state->AddTime(i->speed_ * timeStep);
+            if (ctrl.speed_ != 0.0f)
+                state->AddTime(ctrl.speed_ * timeStep);
 
-            float targetWeight = i->targetWeight_;
-            float fadeTime = i->fadeTime_;
+            float targetWeight = ctrl.targetWeight_;
+            float fadeTime = ctrl.fadeTime_;
 
             // If non-looped animation at the end, activate autofade as applicable
-            if (!state->IsLooped() && state->GetTime() >= state->GetLength() && i->autoFadeTime_ > 0.0f)
+            if (!state->IsLooped() && state->GetTime() >= state->GetLength() && ctrl.autoFadeTime_ > 0.0f)
             {
                 targetWeight = 0.0f;
-                fadeTime = i->autoFadeTime_;
+                fadeTime = ctrl.autoFadeTime_;
             }
 
             // Process weight fade
@@ -122,21 +130,21 @@ void AnimationController::Update(float timeStep)
             }
 
             // Remove if weight zero and target weight zero
-            if (state->GetWeight() == 0.0f && (targetWeight == 0.0f || fadeTime == 0.0f))
+            if (state->GetWeight() == 0.0f && (targetWeight == 0.0f || fadeTime == 0.0f) && ctrl.removeOnCompletion_)
                 remove = true;
         }
 
         // Decrement the command time-to-live values
-        if (i->setTimeTtl_ > 0.0f)
-            i->setTimeTtl_ = Max(i->setTimeTtl_ - timeStep, 0.0f);
-        if (i->setWeightTtl_ > 0.0f)
-            i->setWeightTtl_ = Max(i->setWeightTtl_ - timeStep, 0.0f);
+        if (ctrl.setTimeTtl_ > 0.0f)
+            ctrl.setTimeTtl_ = Max(ctrl.setTimeTtl_ - timeStep, 0.0f);
+        if (ctrl.setWeightTtl_ > 0.0f)
+            ctrl.setWeightTtl_ = Max(ctrl.setWeightTtl_ - timeStep, 0.0f);
 
         if (remove)
         {
             if (state)
                 RemoveAnimationState(state);
-            i = animations_.Erase(i);
+            animations_.Erase(i);
             MarkNetworkUpdate();
         }
         else
@@ -150,14 +158,19 @@ void AnimationController::Update(float timeStep)
 
 bool AnimationController::Play(const String& name, unsigned char layer, bool looped, float fadeInTime)
 {
+    // Get the animation resource first to be able to get the canonical resource name
+    // (avoids potential adding of duplicate animations)
+    auto* newAnimation = GetSubsystem<ResourceCache>()->GetResource<Animation>(name);
+    if (!newAnimation)
+        return false;
+
     // Check if already exists
     unsigned index;
     AnimationState* state;
-    FindAnimation(name, index, state);
+    FindAnimation(newAnimation->GetName(), index, state);
 
     if (!state)
     {
-        Animation* newAnimation = GetSubsystem<ResourceCache>()->GetResource<Animation>(name);
         state = AddAnimationState(newAnimation);
         if (!state)
             return false;
@@ -166,9 +179,8 @@ bool AnimationController::Play(const String& name, unsigned char layer, bool loo
     if (index == M_MAX_UNSIGNED)
     {
         AnimationControl newControl;
-        Animation* animation = state->GetAnimation();
-        newControl.name_ = animation->GetName();
-        newControl.hash_ = animation->GetNameHash();
+        newControl.name_ = newAnimation->GetName();
+        newControl.hash_ = newAnimation->GetNameHash();
         animations_.Push(newControl);
         index = animations_.Size() - 1;
     }
@@ -184,8 +196,13 @@ bool AnimationController::Play(const String& name, unsigned char layer, bool loo
 
 bool AnimationController::PlayExclusive(const String& name, unsigned char layer, bool looped, float fadeTime)
 {
-    FadeOthers(name, 0.0f, fadeTime);
-    return Play(name, layer, looped, fadeTime);
+    bool success = Play(name, layer, looped, fadeTime);
+
+    // Fade other animations only if successfully started the new one
+    if (success)
+        FadeOthers(name, 0.0f, fadeTime);
+
+    return success;
 }
 
 bool AnimationController::Stop(const String& name, float fadeOutTime)
@@ -200,7 +217,7 @@ bool AnimationController::Stop(const String& name, float fadeOutTime)
         MarkNetworkUpdate();
     }
 
-    return index != M_MAX_UNSIGNED || state != 0;
+    return index != M_MAX_UNSIGNED || state != nullptr;
 }
 
 void AnimationController::StopLayer(unsigned char layer, float fadeOutTime)
@@ -294,7 +311,7 @@ bool AnimationController::SetLayer(const String& name, unsigned char layer)
 bool AnimationController::SetStartBone(const String& name, const String& startBoneName)
 {
     // Start bone can only be set in model mode
-    AnimatedModel* model = GetComponent<AnimatedModel>();
+    auto* model = GetComponent<AnimatedModel>();
     if (!model)
         return false;
 
@@ -353,6 +370,23 @@ bool AnimationController::SetWeight(const String& name, float weight)
     animations_[index].setWeight_ = (unsigned char)(weight * 255.0f);
     animations_[index].setWeightTtl_ = COMMAND_STAY_TIME;
     ++animations_[index].setWeightRev_;
+    // Cancel any ongoing weight fade
+    animations_[index].targetWeight_ = weight;
+    animations_[index].fadeTime_ = 0.0f;
+
+    MarkNetworkUpdate();
+    return true;
+}
+
+bool AnimationController::SetRemoveOnCompletion(const String& name, bool removeOnCompletion)
+{
+    unsigned index;
+    AnimationState* state;
+    FindAnimation(name, index, state);
+    if (index == M_MAX_UNSIGNED || !state)
+        return false;
+
+    animations_[index].removeOnCompletion_ = removeOnCompletion;
     MarkNetworkUpdate();
     return true;
 }
@@ -364,6 +398,17 @@ bool AnimationController::SetLooped(const String& name, bool enable)
         return false;
 
     state->SetLooped(enable);
+    MarkNetworkUpdate();
+    return true;
+}
+
+bool AnimationController::SetBlendMode(const String& name, AnimationBlendMode mode)
+{
+    AnimationState* state = GetAnimationState(name);
+    if (!state)
+        return false;
+
+    state->SetBlendMode(mode);
     MarkNetworkUpdate();
     return true;
 }
@@ -389,6 +434,18 @@ bool AnimationController::IsPlaying(const String& name) const
     return index != M_MAX_UNSIGNED;
 }
 
+bool AnimationController::IsPlaying(unsigned char layer) const
+{
+    for (Vector<AnimationControl>::ConstIterator i = animations_.Begin(); i != animations_.End(); ++i)
+    {
+        AnimationState* state = GetAnimationState(i->hash_);
+        if (state && state->GetLayer() == layer)
+            return true;
+    }
+
+    return false;
+}
+
 bool AnimationController::IsFadingIn(const String& name) const
 {
     unsigned index;
@@ -409,19 +466,30 @@ bool AnimationController::IsFadingOut(const String& name) const
         return false;
 
     return (animations_[index].fadeTime_ && animations_[index].targetWeight_ < state->GetWeight())
-        || (!state->IsLooped() && state->GetTime() >= state->GetLength() && animations_[index].autoFadeTime_);
+           || (!state->IsLooped() && state->GetTime() >= state->GetLength() && animations_[index].autoFadeTime_);
+}
+
+bool AnimationController::IsAtEnd(const String& name) const
+{
+    unsigned index;
+    AnimationState* state;
+    FindAnimation(name, index, state);
+    if (index == M_MAX_UNSIGNED || !state)
+        return false;
+    else
+        return state->GetTime() >= state->GetLength();
 }
 
 unsigned char AnimationController::GetLayer(const String& name) const
 {
     AnimationState* state = GetAnimationState(name);
-    return state ? state->GetLayer() : 0;
+    return (unsigned char)(state ? state->GetLayer() : 0);
 }
 
 Bone* AnimationController::GetStartBone(const String& name) const
 {
     AnimationState* state = GetAnimationState(name);
-    return state ? state->GetStartBone() : 0;
+    return state ? state->GetStartBone() : nullptr;
 }
 
 const String& AnimationController::GetStartBoneName(const String& name) const
@@ -446,6 +514,12 @@ bool AnimationController::IsLooped(const String& name) const
 {
     AnimationState* state = GetAnimationState(name);
     return state ? state->IsLooped() : false;
+}
+
+AnimationBlendMode AnimationController::GetBlendMode(const String& name) const
+{
+    AnimationState* state = GetAnimationState(name);
+    return state ? state->GetBlendMode() : ABM_LERP;
 }
 
 float AnimationController::GetLength(const String& name) const
@@ -486,6 +560,14 @@ float AnimationController::GetAutoFade(const String& name) const
     return index != M_MAX_UNSIGNED ? animations_[index].autoFadeTime_ : 0.0f;
 }
 
+bool AnimationController::GetRemoveOnCompletion(const String& name) const
+{
+    unsigned index;
+    AnimationState* state;
+    FindAnimation(name, index, state);
+    return index != M_MAX_UNSIGNED ? animations_[index].removeOnCompletion_ : false;
+}
+
 AnimationState* AnimationController::GetAnimationState(const String& name) const
 {
     return GetAnimationState(StringHash(name));
@@ -494,7 +576,7 @@ AnimationState* AnimationController::GetAnimationState(const String& name) const
 AnimationState* AnimationController::GetAnimationState(StringHash nameHash) const
 {
     // Model mode
-    AnimatedModel* model = GetComponent<AnimatedModel>();
+    auto* model = GetComponent<AnimatedModel>();
     if (model)
         return model->GetAnimationState(nameHash);
 
@@ -506,7 +588,7 @@ AnimationState* AnimationController::GetAnimationState(StringHash nameHash) cons
             return *i;
     }
 
-    return 0;
+    return nullptr;
 }
 
 void AnimationController::SetAnimationsAttr(const VariantVector& value)
@@ -531,7 +613,7 @@ void AnimationController::SetNetAnimationsAttr(const PODVector<unsigned char>& v
 {
     MemoryBuffer buf(value);
 
-    AnimatedModel* model = GetComponent<AnimatedModel>();
+    auto* model = GetComponent<AnimatedModel>();
 
     // Check which animations we need to remove
     HashSet<StringHash> processedAnimations;
@@ -547,11 +629,11 @@ void AnimationController::SetNetAnimationsAttr(const PODVector<unsigned char>& v
         AnimationState* state = GetAnimationState(animHash);
         if (!state)
         {
-            Animation* newAnimation = GetSubsystem<ResourceCache>()->GetResource<Animation>(animName);
+            auto* newAnimation = GetSubsystem<ResourceCache>()->GetResource<Animation>(animName);
             state = AddAnimationState(newAnimation);
             if (!state)
             {
-                LOGERROR("Animation update applying aborted due to unknown animation");
+                URHO3D_LOGERROR("Animation update applying aborted due to unknown animation");
                 return;
             }
         }
@@ -573,6 +655,7 @@ void AnimationController::SetNetAnimationsAttr(const PODVector<unsigned char>& v
         unsigned char ctrl = buf.ReadUByte();
         state->SetLayer(buf.ReadUByte());
         state->SetLooped((ctrl & CTRL_LOOPED) != 0);
+        state->SetBlendMode((ctrl & CTRL_ADDITIVE) != 0 ? ABM_ADDITIVE : ABM_LERP);
         animations_[index].speed_ = (float)buf.ReadShort() / 2048.0f; // 11 bits of decimal precision, max. 16x playback speed
         animations_[index].targetWeight_ = (float)buf.ReadUByte() / 255.0f; // 8 bits of decimal precision
         animations_[index].fadeTime_ = (float)buf.ReadUByte() / 64.0f; // 6 bits of decimal precision, max. 4 seconds fade
@@ -583,11 +666,14 @@ void AnimationController::SetNetAnimationsAttr(const PODVector<unsigned char>& v
                 state->SetStartBone(model->GetSkeleton().GetBone(boneHash));
         }
         else
-            state->SetStartBone(0);
+            state->SetStartBone(nullptr);
         if (ctrl & CTRL_AUTOFADE)
             animations_[index].autoFadeTime_ = (float)buf.ReadUByte() / 64.0f; // 6 bits of decimal precision, max. 4 seconds fade
         else
             animations_[index].autoFadeTime_ = 0.0f;
+
+        animations_[index].removeOnCompletion_ = (ctrl & CTRL_REMOVEONCOMPLETION) != 0;
+
         if (ctrl & CTRL_SETTIME)
         {
             unsigned char setTimeRev = buf.ReadUByte();
@@ -625,7 +711,7 @@ void AnimationController::SetNetAnimationsAttr(const PODVector<unsigned char>& v
 
 void AnimationController::SetNodeAnimationStatesAttr(const VariantVector& value)
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
     nodeAnimationStates_.Clear();
     unsigned index = 0;
     unsigned numStates = index < value.Size() ? value[index++].GetUInt() : 0;
@@ -651,7 +737,7 @@ void AnimationController::SetNodeAnimationStatesAttr(const VariantVector& value)
         else
         {
             // If not enough data, just add an empty animation state
-            SharedPtr<AnimationState> newState(new AnimationState(GetNode(), 0));
+            SharedPtr<AnimationState> newState(new AnimationState(GetNode(), nullptr));
             nodeAnimationStates_.Push(newState);
         }
     }
@@ -676,7 +762,7 @@ const PODVector<unsigned char>& AnimationController::GetNetAnimationsAttr() cons
 {
     attrBuffer_.Clear();
 
-    AnimatedModel* model = GetComponent<AnimatedModel>();
+    auto* model = GetComponent<AnimatedModel>();
 
     unsigned validAnimations = 0;
     for (Vector<AnimationControl>::ConstIterator i = animations_.Begin(); i != animations_.End(); ++i)
@@ -696,10 +782,14 @@ const PODVector<unsigned char>& AnimationController::GetNetAnimationsAttr() cons
         Bone* startBone = state->GetStartBone();
         if (state->IsLooped())
             ctrl |= CTRL_LOOPED;
+        if (state->GetBlendMode() == ABM_ADDITIVE)
+            ctrl |= CTRL_ADDITIVE;
         if (startBone && model && startBone != model->GetSkeleton().GetRootBone())
             ctrl |= CTRL_STARTBONE;
         if (i->autoFadeTime_ > 0.0f)
             ctrl |= CTRL_AUTOFADE;
+        if (i->removeOnCompletion_)
+            ctrl |= CTRL_REMOVEONCOMPLETION;
         if (i->setTimeTtl_ > 0.0f)
             ctrl |= CTRL_SETTIME;
         if (i->setWeightTtl_ > 0.0f)
@@ -746,23 +836,21 @@ VariantVector AnimationController::GetNodeAnimationStatesAttr() const
     return ret;
 }
 
-void AnimationController::OnNodeSet(Node* node)
+void AnimationController::OnSceneSet(Scene* scene)
 {
-    if (node)
-    {
-        Scene* scene = GetScene();
-        if (scene && IsEnabledEffective())
-            SubscribeToEvent(scene, E_SCENEPOSTUPDATE, HANDLER(AnimationController, HandleScenePostUpdate));
-    }
+    if (scene && IsEnabledEffective())
+        SubscribeToEvent(scene, E_SCENEPOSTUPDATE, URHO3D_HANDLER(AnimationController, HandleScenePostUpdate));
+    else if (!scene)
+        UnsubscribeFromEvent(E_SCENEPOSTUPDATE);
 }
 
 AnimationState* AnimationController::AddAnimationState(Animation* animation)
 {
     if (!animation)
-        return 0;
+        return nullptr;
 
     // Model mode
-    AnimatedModel* model = GetComponent<AnimatedModel>();
+    auto* model = GetComponent<AnimatedModel>();
     if (model)
         return model->AddAnimationState(animation);
 
@@ -778,7 +866,7 @@ void AnimationController::RemoveAnimationState(AnimationState* state)
         return;
 
     // Model mode
-    AnimatedModel* model = GetComponent<AnimatedModel>();
+    auto* model = GetComponent<AnimatedModel>();
     if (model)
     {
         model->RemoveAnimationState(state);
@@ -798,7 +886,7 @@ void AnimationController::RemoveAnimationState(AnimationState* state)
 
 void AnimationController::FindAnimation(const String& name, unsigned& index, AnimationState*& state) const
 {
-    StringHash nameHash(name);
+    StringHash nameHash(GetInternalPath(name));
 
     // Find the AnimationState
     state = GetAnimationState(nameHash);

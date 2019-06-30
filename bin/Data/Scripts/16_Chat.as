@@ -6,7 +6,7 @@
 #include "Scripts/Utilities/Sample.as"
 
 // Identifier for the chat network messages
-const int MSG_CHAT = 32;
+const int MSG_CHAT = 153;
 // UDP port we will use
 const uint CHAT_SERVER_PORT = 2345;
 
@@ -29,6 +29,9 @@ void Start()
 
     // Create the user interface
     CreateUI();
+
+    // Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_FREE);
 
     // Subscribe to UI and network events
     SubscribeToEvents();
@@ -61,7 +64,7 @@ void CreateUI()
 
     UpdateButtons();
 
-    chatHistory.Resize((graphics.height - 20) / chatHistoryText.rowHeight);
+    chatHistory.Resize((graphics.height - 100) / chatHistoryText.rowHeight);
 
     // No viewports or scene is defined. However, the default zone's fog color controls the fill color
     renderer.defaultZone.fogColor = Color(0.0f, 0.0f, 0.1f);

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,11 @@
 // THE SOFTWARE.
 //
 
-#include "../Urho2D/TileMapDefs2D.h"
+#include "../Precompiled.h"
+
 #include "../Resource/XMLElement.h"
+#include "../Resource/JSONFile.h"
+#include "../Urho2D/TileMapDefs2D.h"
 
 #include "../DebugNew.h"
 
@@ -38,6 +41,8 @@ float TileMapInfo2D::GetMapHeight() const
 {
     if (orientation_ == O_STAGGERED)
         return (height_ + 1) * 0.5f * tileHeight_;
+    else if (orientation_ == O_HEXAGONAL)
+        return (height_) * 0.5f * (tileHeight_ + tileHeight_ * 0.5f);
     else
         return height_ * tileHeight_;
 }
@@ -49,18 +54,18 @@ Vector2 TileMapInfo2D::ConvertPosition(const Vector2& position) const
     case O_ISOMETRIC:
         {
             Vector2 index = position * PIXEL_SIZE / tileHeight_;
-            return Vector2((width_ + index.x_ - index.y_) * tileWidth_ * 0.5f, (height_ * 2.0f - index.x_ - index.y_) * tileHeight_ * 0.5f);
+            return Vector2((width_ + index.x_ - index.y_) * tileWidth_ * 0.5f,
+                (height_ * 2.0f - index.x_ - index.y_) * tileHeight_ * 0.5f);
         }
 
     case O_STAGGERED:
         return Vector2(position.x_ * PIXEL_SIZE, GetMapHeight() - position.y_ * PIXEL_SIZE);
 
+    case O_HEXAGONAL:
     case O_ORTHOGONAL:
     default:
         return Vector2(position.x_ * PIXEL_SIZE, GetMapHeight() - position.y_ * PIXEL_SIZE);
     }
-
-    return Vector2::ZERO;
 }
 
 Vector2 TileMapInfo2D::TileIndexToPosition(int x, int y) const
@@ -74,14 +79,18 @@ Vector2 TileMapInfo2D::TileIndexToPosition(int x, int y) const
         if (y % 2 == 0)
             return Vector2(x * tileWidth_, (height_ - 1 - y) * 0.5f * tileHeight_);
         else
-            return Vector2((x + 0.5f) * tileWidth_, (height_ - 1 - y)  * 0.5f * tileHeight_);
+            return Vector2((x + 0.5f) * tileWidth_, (height_ - 1 - y) * 0.5f * tileHeight_);
+
+    case O_HEXAGONAL:
+        if (y % 2 == 0)
+            return Vector2(x * tileWidth_, (height_ - 1 - y) * 0.75f * tileHeight_);
+        else
+            return Vector2((x + 0.5f) * tileWidth_, (height_ - 1 - y)  * 0.75f * tileHeight_);
 
     case O_ORTHOGONAL:
     default:
         return Vector2(x * tileWidth_, (height_ - 1 - y) * tileHeight_);
     }
-
-    return Vector2::ZERO;
 }
 
 bool TileMapInfo2D::PositionToTileIndex(int& x, int& y, const Vector2& position) const
@@ -89,12 +98,13 @@ bool TileMapInfo2D::PositionToTileIndex(int& x, int& y, const Vector2& position)
     switch (orientation_)
     {
     case O_ISOMETRIC:
-        {
-            int x_sub_y = (int)(position.x_ * 2.0f / tileWidth_ + 1 - width_);
-            int x_add_y = (int)(height_ * 2.0f - position.y_ * 2.0f / tileHeight_ - 2.0f);
-            x = (x_sub_y - x_add_y) / 2;
-            y = (x_sub_y - x_add_y) / 2;
-        }
+    {
+        float ox = position.x_ / tileWidth_ - height_ * 0.5f;
+        float oy = position.y_ / tileHeight_;
+
+        x = (int)(width_ - oy + ox);
+        y = (int)(height_ - oy - ox);
+    }
         break;
 
     case O_STAGGERED:
@@ -104,6 +114,14 @@ bool TileMapInfo2D::PositionToTileIndex(int& x, int& y, const Vector2& position)
         else
             x = (int)(position.x_ / tileWidth_ - 0.5f);
 
+        break;
+
+    case O_HEXAGONAL:
+        y = (int)(height_ - 1 - position.y_ / 0.75f / tileHeight_);
+        if (y % 2 == 0)
+            x = (int)(position.x_ / tileWidth_);
+        else
+            x = (int)(position.x_ / tileWidth_ - 0.75f);
         break;
 
     case O_ORTHOGONAL:
@@ -117,13 +135,9 @@ bool TileMapInfo2D::PositionToTileIndex(int& x, int& y, const Vector2& position)
     return x >= 0 && x < width_ && y >= 0 && y < height_;
 }
 
-PropertySet2D::PropertySet2D()
-{
-}
+PropertySet2D::PropertySet2D() = default;
 
-PropertySet2D::~PropertySet2D()
-{
-}
+PropertySet2D::~PropertySet2D() = default;
 
 void PropertySet2D::Load(const XMLElement& element)
 {
@@ -146,8 +160,8 @@ const String& PropertySet2D::GetProperty(const String& name) const
     return i->second_;
 }
 
-Tile2D::Tile2D() : 
-    gid_(0) 
+Tile2D::Tile2D() :
+    gid_(0)
 {
 }
 
@@ -171,9 +185,7 @@ const String& Tile2D::GetProperty(const String& name) const
     return propertySet_->GetProperty(name);
 }
 
-TileMapObject2D::TileMapObject2D()
-{
-}
+TileMapObject2D::TileMapObject2D() = default;
 
 unsigned TileMapObject2D::GetNumPoints() const
 {

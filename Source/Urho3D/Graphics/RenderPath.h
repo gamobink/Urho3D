@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "../Math/Color.h"
-#include "../Graphics/GraphicsDefs.h"
 #include "../Container/Ptr.h"
 #include "../Container/RefCounted.h"
+#include "../Graphics/GraphicsDefs.h"
+#include "../Math/Color.h"
 #include "../Math/Vector4.h"
 
 namespace Urho3D
@@ -43,7 +43,8 @@ enum RenderCommandType
     CMD_QUAD,
     CMD_FORWARDLIGHTS,
     CMD_LIGHTVOLUMES,
-    CMD_RENDERUI
+    CMD_RENDERUI,
+    CMD_SENDEVENT
 };
 
 /// Rendering path sorting modes.
@@ -62,56 +63,40 @@ enum RenderTargetSizeMode
 };
 
 /// Rendertarget definition.
-struct RenderTargetInfo
+struct URHO3D_API RenderTargetInfo
 {
-    /// Construct.
-    RenderTargetInfo() :
-        size_(Vector2::ZERO),
-        sizeMode_(SIZE_ABSOLUTE),
-        enabled_(true),
-        filtered_(false),
-        sRGB_(false),
-        persistent_(false)
-    {
-    }
-    
     /// Read from an XML element.
     void Load(const XMLElement& element);
-    
+
     /// Name.
     String name_;
     /// Tag name.
     String tag_;
     /// Texture format.
-    unsigned format_;
+    unsigned format_{};
     /// Absolute size or multiplier.
     Vector2 size_;
     /// Size mode.
-    RenderTargetSizeMode sizeMode_;
+    RenderTargetSizeMode sizeMode_{SIZE_ABSOLUTE};
+    /// Multisampling level (1 = no multisampling).
+    int multiSample_{1};
+    /// Multisampling autoresolve flag.
+    bool autoResolve_{true};
     /// Enabled flag.
-    bool enabled_;
+    bool enabled_{true};
+    /// Cube map flag.
+    bool cubemap_{};
     /// Filtering flag.
-    bool filtered_;
+    bool filtered_{};
     /// sRGB sampling/writing mode flag.
-    bool sRGB_;
+    bool sRGB_{};
     /// Should be persistent and not shared/reused between other buffers of same size.
-    bool persistent_;
+    bool persistent_{};
 };
 
 /// Rendering path command.
-struct RenderPathCommand
+struct URHO3D_API RenderPathCommand
 {
-    /// Construct.
-    RenderPathCommand() :
-        clearFlags_(0),
-        enabled_(true),
-        useFogColor_(false),
-        markToStencil_(false),
-        useLitBase_(true),
-        vertexLights_(false)
-    {
-    }
-    
     /// Read from an XML element.
     void Load(const XMLElement& element);
     /// Set a texture resource name. Can also refer to a rendertarget defined in the rendering path.
@@ -122,30 +107,41 @@ struct RenderPathCommand
     void RemoveShaderParameter(const String& name);
     /// Set number of output rendertargets.
     void SetNumOutputs(unsigned num);
+    /// Set output rendertarget name and face index for cube maps.
+    void SetOutput(unsigned index, const String& name, CubeMapFace face = FACE_POSITIVE_X);
     /// Set output rendertarget name.
     void SetOutputName(unsigned index, const String& name);
+    /// Set output rendertarget face index for cube maps.
+    void SetOutputFace(unsigned index, CubeMapFace face);
     /// Set depth-stencil output name. When empty, will assign a depth-stencil buffer automatically.
     void SetDepthStencilName(const String& name);
-    
+
     /// Return texture resource name.
     const String& GetTextureName(TextureUnit unit) const;
     /// Return shader parameter.
     const Variant& GetShaderParameter(const String& name) const;
+
     /// Return number of output rendertargets.
-    unsigned GetNumOutputs() const { return outputNames_.Size(); }
+    unsigned GetNumOutputs() const { return outputs_.Size(); }
+
     /// Return output rendertarget name.
     const String& GetOutputName(unsigned index) const;
+    /// Return output rendertarget face index.
+    CubeMapFace GetOutputFace(unsigned index) const;
+
     /// Return depth-stencil output name.
     const String& GetDepthStencilName() const { return depthStencilName_; }
-    
+
     /// Tag name.
     String tag_;
     /// Command type.
-    RenderCommandType type_;
+    RenderCommandType type_{};
     /// Sorting mode.
-    RenderCommandSortMode sortMode_;
+    RenderCommandSortMode sortMode_{};
     /// Scene pass name.
     String pass_;
+    /// Scene pass index. Filled by View.
+    unsigned passIndex_{};
     /// Command/pass metadata.
     String metadata_;
     /// Vertex shader name.
@@ -160,39 +156,43 @@ struct RenderPathCommand
     String textureNames_[MAX_TEXTURE_UNITS];
     /// %Shader parameters.
     HashMap<StringHash, Variant> shaderParameters_;
-    /// Output rendertarget names.
-    Vector<String> outputNames_;
+    /// Output rendertarget names and faces.
+    Vector<Pair<String, CubeMapFace> > outputs_;
     /// Depth-stencil output name.
     String depthStencilName_;
-    /// Clear flags.
-    unsigned clearFlags_;
-    /// Clear color.
+    /// Clear flags. Affects clear command only.
+    ClearTargetFlags clearFlags_{};
+    /// Clear color. Affects clear command only.
     Color clearColor_;
-    /// Clear depth.
-    float clearDepth_;
-    /// Clear stencil value.
-    unsigned clearStencil_;
+    /// Clear depth. Affects clear command only.
+    float clearDepth_{};
+    /// Clear stencil value. Affects clear command only.
+    unsigned clearStencil_{};
+    /// Blend mode. Affects quad command only.
+    BlendMode blendMode_{BLEND_REPLACE};
     /// Enabled flag.
-    bool enabled_;
+    bool enabled_{true};
     /// Use fog color for clearing.
-    bool useFogColor_;
+    bool useFogColor_{};
     /// Mark to stencil flag.
-    bool markToStencil_;
+    bool markToStencil_{};
     /// Use lit base pass optimization for forward per-pixel lights.
-    bool useLitBase_;
+    bool useLitBase_{true};
     /// Vertex lights flag.
-    bool vertexLights_;
+    bool vertexLights_{};
+    /// Event name.
+    String eventName_;
 };
 
-/// Rendering path definition.
+/// Rendering path definition. A sequence of commands (e.g. clear screen, draw objects with specific pass) that yields the scene rendering result.
 class URHO3D_API RenderPath : public RefCounted
 {
 public:
     /// Construct.
     RenderPath();
     /// Destruct.
-    ~RenderPath();
-    
+    ~RenderPath() override;
+
     /// Clone the rendering path.
     SharedPtr<RenderPath> Clone();
     /// Clear existing data and load from an XML file. Return true if successful.
@@ -201,6 +201,10 @@ public:
     bool Append(XMLFile* file);
     /// Enable/disable commands and rendertargets by tag.
     void SetEnabled(const String& tag, bool active);
+    /// Return true of any of render targets or commands with specified tag are enabled.
+    bool IsEnabled(const String& tag) const;
+    /// Return true if renderpath or command with given tag exists.
+    bool IsAdded(const String& tag) const;
     /// Toggle enabled state of commands and rendertargets by tag.
     void ToggleEnabled(const String& tag);
     /// Assign rendertarget at index.
@@ -225,16 +229,19 @@ public:
     void RemoveCommands(const String& tag);
     /// Set a shader parameter in all commands that define it.
     void SetShaderParameter(const String& name, const Variant& value);
-    
+
     /// Return number of rendertargets.
     unsigned GetNumRenderTargets() const { return renderTargets_.Size(); }
+
     /// Return number of commands.
     unsigned GetNumCommands() const { return commands_.Size(); }
+
     /// Return command at index, or null if does not exist.
-    RenderPathCommand* GetCommand(unsigned index) { return index < commands_.Size() ? &commands_[index] : (RenderPathCommand*)0; }
+    RenderPathCommand* GetCommand(unsigned index) { return index < commands_.Size() ? &commands_[index] : nullptr; }
+
     /// Return a shader parameter (first appearance in any command.)
     const Variant& GetShaderParameter(const String& name) const;
-    
+
     /// Rendertargets.
     Vector<RenderTargetInfo> renderTargets_;
     /// Rendering commands.

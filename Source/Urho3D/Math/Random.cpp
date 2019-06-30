@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,11 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Math/Random.h"
+
+#include "../DebugNew.h"
 
 namespace Urho3D
 {
@@ -40,7 +44,7 @@ unsigned GetRandomSeed()
 int Rand()
 {
     randomSeed = randomSeed * 214013 + 2531011;
-    return (randomSeed >> 16) & 32767;
+    return (randomSeed >> 16u) & 32767u;
 }
 
 float RandStandardNormal()
@@ -49,7 +53,7 @@ float RandStandardNormal()
     for (int i = 0; i < 12; i++)
         val += Rand() / 32768.0f;
     val -= 6.0f;
-    
+
     // Now val is approximatly standard normal distributed
     return val;
 }

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 //
+
+#include "../Precompiled.h"
 
 #include "../IO/Deserializer.h"
 
@@ -41,8 +43,11 @@ Deserializer::Deserializer(unsigned size) :
 {
 }
 
-Deserializer::~Deserializer()
+Deserializer::~Deserializer() = default;
+
+unsigned Deserializer::SeekRelative(int delta)
 {
+    return Seek(GetPosition() + delta);
 }
 
 const String& Deserializer::GetName() const
@@ -53,6 +58,13 @@ const String& Deserializer::GetName() const
 unsigned Deserializer::GetChecksum()
 {
     return 0;
+}
+
+long long Deserializer::ReadInt64()
+{
+    long long ret;
+    Read(&ret, sizeof ret);
+    return ret;
 }
 
 int Deserializer::ReadInt()
@@ -72,6 +84,13 @@ short Deserializer::ReadShort()
 signed char Deserializer::ReadByte()
 {
     signed char ret;
+    Read(&ret, sizeof ret);
+    return ret;
+}
+
+unsigned long long Deserializer::ReadUInt64()
+{
+    unsigned long long ret;
     Read(&ret, sizeof ret);
     return ret;
 }
@@ -99,15 +118,19 @@ unsigned char Deserializer::ReadUByte()
 
 bool Deserializer::ReadBool()
 {
-    if (ReadUByte())
-        return true;
-    else
-        return false;
+    return ReadUByte() != 0;
 }
 
 float Deserializer::ReadFloat()
 {
     float ret;
+    Read(&ret, sizeof ret);
+    return ret;
+}
+
+double Deserializer::ReadDouble()
+{
+    double ret;
     Read(&ret, sizeof ret);
     return ret;
 }
@@ -124,6 +147,13 @@ IntVector2 Deserializer::ReadIntVector2()
     int data[2];
     Read(data, sizeof data);
     return IntVector2(data);
+}
+
+IntVector3 Deserializer::ReadIntVector3()
+{
+    int data[3];
+    Read(data, sizeof data);
+    return IntVector3(data);
 }
 
 Rect Deserializer::ReadRect()
@@ -217,7 +247,7 @@ BoundingBox Deserializer::ReadBoundingBox()
 String Deserializer::ReadString()
 {
     String ret;
-    
+
     while (!IsEof())
     {
         char c = ReadByte();
@@ -226,7 +256,7 @@ String Deserializer::ReadString()
         else
             ret += c;
     }
-    
+
     return ret;
 }
 
@@ -271,7 +301,7 @@ ResourceRefList Deserializer::ReadResourceRefList()
 
 Variant Deserializer::ReadVariant()
 {
-    VariantType type = (VariantType)ReadUByte();
+    auto type = (VariantType)ReadUByte();
     return ReadVariant(type);
 }
 
@@ -281,69 +311,87 @@ Variant Deserializer::ReadVariant(VariantType type)
     {
     case VAR_INT:
         return Variant(ReadInt());
-        
+
+    case VAR_INT64:
+        return Variant(ReadInt64());
+
     case VAR_BOOL:
         return Variant(ReadBool());
-        
+
     case VAR_FLOAT:
         return Variant(ReadFloat());
-        
+
     case VAR_VECTOR2:
         return Variant(ReadVector2());
-        
+
     case VAR_VECTOR3:
         return Variant(ReadVector3());
-        
+
     case VAR_VECTOR4:
         return Variant(ReadVector4());
-        
+
     case VAR_QUATERNION:
         return Variant(ReadQuaternion());
-        
+
     case VAR_COLOR:
         return Variant(ReadColor());
-        
+
     case VAR_STRING:
         return Variant(ReadString());
-        
+
     case VAR_BUFFER:
         return Variant(ReadBuffer());
-        
+
         // Deserializing pointers is not supported. Return null
     case VAR_VOIDPTR:
     case VAR_PTR:
         ReadUInt();
-        return Variant((void*)0);
-        
+        return Variant((void*)nullptr);
+
     case VAR_RESOURCEREF:
         return Variant(ReadResourceRef());
-        
+
     case VAR_RESOURCEREFLIST:
         return Variant(ReadResourceRefList());
-        
+
     case VAR_VARIANTVECTOR:
         return Variant(ReadVariantVector());
-        
+
+    case VAR_STRINGVECTOR:
+        return Variant(ReadStringVector());
+
     case VAR_VARIANTMAP:
         return Variant(ReadVariantMap());
-        
+
     case VAR_INTRECT:
         return Variant(ReadIntRect());
-        
+
     case VAR_INTVECTOR2:
         return Variant(ReadIntVector2());
-        
+
+    case VAR_INTVECTOR3:
+        return Variant(ReadIntVector3());
+
     case VAR_MATRIX3:
         return Variant(ReadMatrix3());
-        
+
     case VAR_MATRIX3X4:
         return Variant(ReadMatrix3x4());
-        
+
     case VAR_MATRIX4:
         return Variant(ReadMatrix4());
-        
+
+    case VAR_DOUBLE:
+        return Variant(ReadDouble());
+
+        // Deserializing custom values is not supported. Return empty
+    case VAR_CUSTOM_HEAP:
+    case VAR_CUSTOM_STACK:
+        ReadUInt();
+        return Variant::EMPTY;
+
     default:
-        return Variant();
+        return Variant::EMPTY;
     }
 }
 
@@ -355,17 +403,25 @@ VariantVector Deserializer::ReadVariantVector()
     return ret;
 }
 
+StringVector Deserializer::ReadStringVector()
+{
+    StringVector ret(ReadVLE());
+    for (unsigned i = 0; i < ret.Size(); ++i)
+        ret[i] = ReadString();
+    return ret;
+}
+
 VariantMap Deserializer::ReadVariantMap()
 {
     VariantMap ret;
     unsigned num = ReadVLE();
-    
+
     for (unsigned i = 0; i < num; ++i)
     {
         StringHash key = ReadStringHash();
         ret[key] = ReadVariant();
     }
-    
+
     return ret;
 }
 
@@ -373,24 +429,24 @@ unsigned Deserializer::ReadVLE()
 {
     unsigned ret;
     unsigned char byte;
-    
+
     byte = ReadUByte();
-    ret = byte & 0x7f;
+    ret = (unsigned)(byte & 0x7fu);
     if (byte < 0x80)
         return ret;
-    
+
     byte = ReadUByte();
-    ret |= ((unsigned)(byte & 0x7f)) << 7;
+    ret |= ((unsigned)(byte & 0x7fu)) << 7u;
     if (byte < 0x80)
         return ret;
-    
+
     byte = ReadUByte();
-    ret |= ((unsigned)(byte & 0x7f)) << 14;
+    ret |= ((unsigned)(byte & 0x7fu)) << 14u;
     if (byte < 0x80)
         return ret;
-    
+
     byte = ReadUByte();
-    ret |= ((unsigned)byte) << 21;
+    ret |= ((unsigned)byte) << 21u;
     return ret;
 }
 
@@ -404,7 +460,7 @@ unsigned Deserializer::ReadNetID()
 String Deserializer::ReadLine()
 {
     String ret;
-    
+
     while (!IsEof())
     {
         char c = ReadByte();
@@ -421,10 +477,10 @@ String Deserializer::ReadLine()
             }
             break;
         }
-        
+
         ret += c;
     }
-    
+
     return ret;
 }
 

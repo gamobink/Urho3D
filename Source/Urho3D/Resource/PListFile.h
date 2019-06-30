@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,41 +43,40 @@ enum PListValueType
 
 class PListValue;
 
-class PListValueMap : public HashMap<String, PListValue>
-{
-public:
-    PListValue& operator [](const String& key); 
-    const PListValue& operator [](const String& key) const;
-};
+/// PList value map.
+using PListValueMap = HashMap<String, PListValue>;
 
-typedef Vector<PListValue> PListValueVector;
+/// Vector of PList value.
+using PListValueVector = Vector<PListValue>;
 
+/// PList value.
 class URHO3D_API PListValue
 {
 public:
-    // Construct.
+    /// Construct.
     PListValue();
-    // Construct from int.
-    PListValue(int value);
-    // Construct from boolean.
-    PListValue(bool value);
-    // Construct from float.
-    PListValue(float value);
-    // Construct from string.
-    PListValue(const String& value);
-    // Construct from value map.
-    PListValue(PListValueMap& valueMap);
-    // Construct from value vector.
-    PListValue(PListValueVector& valueVector);
-    // Construct from another value.
+    /// Construct from int.
+    explicit PListValue(int value);
+    /// Construct from boolean.
+    explicit PListValue(bool value);
+    /// Construct from float.
+    explicit PListValue(float value);
+    /// Construct from string.
+    explicit PListValue(const String& value);
+    /// Construct from value map.
+    explicit PListValue(PListValueMap& valueMap);
+    /// Construct from value vector.
+    explicit PListValue(PListValueVector& valueVector);
+    /// Construct from another value.
     PListValue(const PListValue& value);
     /// Destruct.
     ~PListValue();
 
     /// Assign operator.
-    PListValue& operator = (const PListValue& rhs);
+    PListValue& operator =(const PListValue& rhs);
+
     /// Return true if is valid.
-    operator bool () const { return type_ != PLVT_NONE; }
+    explicit operator bool() const { return type_ != PLVT_NONE; }
 
     /// Set int.
     void SetInt(int value);
@@ -88,12 +87,13 @@ public:
     /// Set string.
     void SetString(const String& value);
     /// Set value map.
-    void SetValueMap(const PListValueMap& valueMap);    
+    void SetValueMap(const PListValueMap& valueMap);
     /// Set value vector.
     void SetValueVector(const PListValueVector& valueVector);
 
     /// Return type.
     PListValueType GetType() const { return type_; }
+
     /// Return int.
     int GetInt() const;
     /// Return boolean.
@@ -106,6 +106,8 @@ public:
     IntRect GetIntRect() const;
     /// Return IntVector2, for string type.
     IntVector2 GetIntVector2() const;
+    /// Return IntVector3, for string type.
+    IntVector3 GetIntVector3() const;
     /// Return value map.
     const PListValueMap& GetValueMap() const;
     /// Return value vector.
@@ -137,18 +139,18 @@ private:
 /// Property list (plist).
 class URHO3D_API PListFile : public Resource
 {
-    OBJECT(PListFile);
+    URHO3D_OBJECT(PListFile, Resource);
 
 public:
     /// Construct.
-    PListFile(Context* context);
+    explicit PListFile(Context* context);
     /// Destruct.
-    virtual ~PListFile();
+    ~PListFile() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Load resource from stream. May be called from a worker thread. Return true if successful.
-    virtual bool BeginLoad(Deserializer& source);
+    bool BeginLoad(Deserializer& source) override;
 
     /// Return root.
     const PListValueMap& GetRoot() const { return root_; }
@@ -159,7 +161,7 @@ private:
     /// Load array.
     bool LoadArray(PListValueVector& array, const XMLElement& arrayElem);
     /// Load value.
-    bool LoadValue(PListValue& value, XMLElement valueElem);
+    bool LoadValue(PListValue& value, const XMLElement& valueElem);
 
     /// Root dictionary.
     PListValueMap root_;

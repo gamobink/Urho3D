@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,14 +41,14 @@ static const unsigned SCAN_HIDDEN = 0x4;
 /// Subsystem for file and directory operations and access control.
 class URHO3D_API FileSystem : public Object
 {
-    OBJECT(FileSystem);
-    
+    URHO3D_OBJECT(FileSystem, Object);
+
 public:
     /// Construct.
-    FileSystem(Context* context);
+    explicit FileSystem(Context* context);
     /// Destruct.
-    ~FileSystem();
-    
+    ~FileSystem() override;
+
     /// Set the current working directory.
     bool SetCurrentDir(const String& pathName);
     /// Create a directory.
@@ -75,13 +75,16 @@ public:
     void RegisterPath(const String& pathName);
     /// Set a file's last modified time as seconds since 1.1.1970. Return true on success.
     bool SetLastModifiedTime(const String& fileName, unsigned newTime);
-    
+
     /// Return the absolute current working directory.
     String GetCurrentDir() const;
+
     /// Return whether is executing engine console commands as OS-specific system command.
     bool GetExecuteConsoleCommands() const { return executeConsoleCommands_; }
+
     /// Return whether paths have been registered.
     bool HasRegisteredPaths() const { return allowedPaths_.Size() > 0; }
+
     /// Check if a path is allowed to be accessed. If no paths are registered, all are allowed.
     bool CheckAccess(const String& pathName) const;
     /// Returns the file's last modified time as seconds since 1.1.1970, or 0 if can not be accessed.
@@ -92,35 +95,37 @@ public:
     bool DirExists(const String& pathName) const;
     /// Scan a directory for specified files.
     void ScanDir(Vector<String>& result, const String& pathName, const String& filter, unsigned flags, bool recursive) const;
-    /// Return the program's directory. If it does not contain the Urho3D default CoreData and Data directories, and the current working directory does, return the working directory instead.
+    /// Return the program's directory.
     String GetProgramDir() const;
     /// Return the user documents directory.
     String GetUserDocumentsDir() const;
     /// Return the application preferences directory.
     String GetAppPreferencesDir(const String& org, const String& app) const;
-    
+    /// Return path of temporary directory. Path always ends with a forward slash.
+    String GetTemporaryDir() const;
+
 private:
     /// Scan directory, called internally.
-    void ScanDirInternal(Vector<String>& result, String path, const String& startPath, const String& filter, unsigned flags, bool recursive) const;
+    void ScanDirInternal
+        (Vector<String>& result, String path, const String& startPath, const String& filter, unsigned flags, bool recursive) const;
     /// Handle begin frame event to check for completed async executions.
     void HandleBeginFrame(StringHash eventType, VariantMap& eventData);
     /// Handle a console command event.
     void HandleConsoleCommand(StringHash eventType, VariantMap& eventData);
-    
+
     /// Allowed directories.
     HashSet<String> allowedPaths_;
-    /// Cached program directory.
-    mutable String programDir_;
     /// Async execution queue.
     List<AsyncExecRequest*> asyncExecQueue_;
     /// Next async execution ID.
-    unsigned nextAsyncExecID_;
+    unsigned nextAsyncExecID_{1};
     /// Flag for executing engine console commands as OS-specific system command. Default to true.
-    bool executeConsoleCommands_;
+    bool executeConsoleCommands_{};
 };
 
 /// Split a full path to path, filename and extension. The extension will be converted to lowercase by default.
-URHO3D_API void SplitPath(const String& fullPath, String& pathName, String& fileName, String& extension, bool lowercaseExtension = true);
+URHO3D_API void
+    SplitPath(const String& fullPath, String& pathName, String& fileName, String& extension, bool lowercaseExtension = true);
 /// Return the path from a full path.
 URHO3D_API String GetPath(const String& fullPath);
 /// Return the filename from a full path.
@@ -128,7 +133,7 @@ URHO3D_API String GetFileName(const String& fullPath);
 /// Return the extension from a full path, converted to lowercase by default.
 URHO3D_API String GetExtension(const String& fullPath, bool lowercaseExtension = true);
 /// Return the filename and extension from a full path. The case of the extension is preserved by default, so that the file can be opened in case-sensitive operating systems.
-URHO3D_API String GetFileNameAndExtension(const String& fullPath, bool lowercaseExtension = false);
+URHO3D_API String GetFileNameAndExtension(const String& fileName, bool lowercaseExtension = false);
 /// Replace the extension of a file name with another.
 URHO3D_API String ReplaceExtension(const String& fullPath, const String& newExtension);
 /// Add a slash at the end of the path if missing and convert to internal format (use slashes.)
@@ -136,7 +141,7 @@ URHO3D_API String AddTrailingSlash(const String& pathName);
 /// Remove the slash from the end of a path if exists and convert to internal format (use slashes.)
 URHO3D_API String RemoveTrailingSlash(const String& pathName);
 /// Return the parent path, or the path itself if not available.
-URHO3D_API String GetParentPath(const String& pathName);
+URHO3D_API String GetParentPath(const String& path);
 /// Convert a path to internal format (use slashes.)
 URHO3D_API String GetInternalPath(const String& pathName);
 /// Convert a path to the format required by the operating system.

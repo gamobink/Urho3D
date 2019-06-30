@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,11 +20,13 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
-#include "../UI/DropDownList.h"
 #include "../Input/InputEvents.h"
-#include "../UI/ListView.h"
 #include "../IO/Log.h"
+#include "../UI/DropDownList.h"
+#include "../UI/ListView.h"
 #include "../UI/Text.h"
 #include "../UI/UI.h"
 #include "../UI/UIEvents.h"
@@ -44,7 +46,7 @@ DropDownList::DropDownList(Context* context) :
 {
     focusMode_ = FM_FOCUSABLE_DEFOCUSABLE;
 
-    Window* window = new Window(context_);
+    auto* window = new Window(context_);
     window->SetInternal(true);
     SetPopup(window);
 
@@ -55,26 +57,25 @@ DropDownList::DropDownList(Context* context) :
     popup_->AddChild(listView_);
     placeholder_ = CreateChild<UIElement>("DDL_Placeholder");
     placeholder_->SetInternal(true);
-    Text* text = placeholder_->CreateChild<Text>("DDL_Placeholder_Text");
+    auto* text = placeholder_->CreateChild<Text>("DDL_Placeholder_Text");
     text->SetInternal(true);
     text->SetVisible(false);
 
-    SubscribeToEvent(listView_, E_ITEMCLICKED, HANDLER(DropDownList, HandleItemClicked));
-    SubscribeToEvent(listView_, E_UNHANDLEDKEY, HANDLER(DropDownList, HandleListViewKey));
+    SubscribeToEvent(listView_, E_ITEMCLICKED, URHO3D_HANDLER(DropDownList, HandleItemClicked));
+    SubscribeToEvent(listView_, E_UNHANDLEDKEY, URHO3D_HANDLER(DropDownList, HandleListViewKey));
+    SubscribeToEvent(listView_, E_SELECTIONCHANGED, URHO3D_HANDLER(DropDownList, HandleSelectionChanged));
 }
 
-DropDownList::~DropDownList()
-{
-}
+DropDownList::~DropDownList() = default;
 
 void DropDownList::RegisterObject(Context* context)
 {
     context->RegisterFactory<DropDownList>(UI_CATEGORY);
 
-    COPY_BASE_ATTRIBUTES(Menu);
-    UPDATE_ATTRIBUTE_DEFAULT_VALUE("Focus Mode", FM_FOCUSABLE_DEFOCUSABLE);
-    ACCESSOR_ATTRIBUTE("Selection", GetSelection, SetSelectionAttr, unsigned, 0, AM_FILE);
-    ACCESSOR_ATTRIBUTE("Resize Popup", GetResizePopup, SetResizePopup, bool, false, AM_FILE);
+    URHO3D_COPY_BASE_ATTRIBUTES(Menu);
+    URHO3D_UPDATE_ATTRIBUTE_DEFAULT_VALUE("Focus Mode", FM_FOCUSABLE_DEFOCUSABLE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Selection", GetSelection, SetSelectionAttr, unsigned, 0, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Resize Popup", GetResizePopup, SetResizePopup, bool, false, AM_FILE);
 }
 
 void DropDownList::ApplyAttributes()
@@ -116,8 +117,8 @@ void DropDownList::OnShowPopup()
     content->UpdateLayout();
     const IntVector2& contentSize = content->GetSize();
     const IntRect& border = popup_->GetLayoutBorder();
-    popup_->SetSize(resizePopup_ ? GetWidth() : contentSize.x_ + border.left_ + border.right_, contentSize.y_ + border.top_ +
-        border.bottom_);
+    popup_->SetSize(resizePopup_ ? GetWidth() : contentSize.x_ + border.left_ + border.right_,
+        contentSize.y_ + border.top_ + border.bottom_);
 
     // Check if popup fits below the button. If not, show above instead
     bool showAbove = false;
@@ -160,8 +161,8 @@ void DropDownList::InsertItem(unsigned index, UIElement* item)
     listView_->InsertItem(index, item);
 
     // If there was no selection, set to the first
-    if (listView_->GetSelection() == M_MAX_UNSIGNED)
-        listView_->SetSelection(0);
+    if (GetSelection() == M_MAX_UNSIGNED)
+        SetSelection(0);
 }
 
 void DropDownList::RemoveItem(UIElement* item)
@@ -182,14 +183,11 @@ void DropDownList::RemoveAllItems()
 void DropDownList::SetSelection(unsigned index)
 {
     listView_->SetSelection(index);
-
-    // Display the place holder text when there is no selection, however, the place holder text is only visible when the place holder itself is set to visible
-    placeholder_->GetChild(0)->SetVisible(index == M_MAX_UNSIGNED);
 }
 
 void DropDownList::SetPlaceholderText(const String& text)
 {
-    static_cast<Text*>(placeholder_->GetChild(0))->SetText(text);
+    placeholder_->GetChildStaticCast<Text>(0)->SetText(text);
 }
 
 void DropDownList::SetResizePopup(bool enable)
@@ -224,7 +222,7 @@ UIElement* DropDownList::GetSelectedItem() const
 
 const String& DropDownList::GetPlaceholderText() const
 {
-    return static_cast<Text*>(placeholder_->GetChild(0))->GetText();
+    return placeholder_->GetChildStaticCast<Text>(0)->GetText();
 }
 
 void DropDownList::SetSelectionAttr(unsigned index)
@@ -289,28 +287,29 @@ bool DropDownList::FilterPopupImplicitAttributes(XMLElement& dest) const
         return false;
 
     // Horizontal scroll bar
-    childElem = childElem.GetChild("element");
-    if (childElem && !childElem.GetParent().RemoveChild(childElem))
-        return false;
-
+    XMLElement hScrollElem = childElem.GetChild("element");
     // Vertical scroll bar
-    childElem = childElem.GetNext("element");
-    if (childElem && !childElem.GetParent().RemoveChild(childElem))
-        return false;
-
+    XMLElement vScrollElem = hScrollElem.GetNext("element");
     // Scroll panel
-    childElem = childElem.GetNext("element");
-    if (!childElem)
+    XMLElement panelElem = vScrollElem.GetNext("element");
+
+    if (hScrollElem && !hScrollElem.GetParent().RemoveChild(hScrollElem))
         return false;
-    if (childElem.GetAttribute("style").Empty() && !childElem.SetAttribute("style", "none"))
+    if (vScrollElem && !vScrollElem.GetParent().RemoveChild(vScrollElem))
         return false;
 
-    // Item container
-    childElem = childElem.GetChild("element");
-    if (!childElem)
-        return false;
-    if (childElem.GetAttribute("style").Empty() && !childElem.SetAttribute("style", "none"))
-        return false;
+    if (panelElem)
+    {
+        if (panelElem.GetAttribute("style").Empty() && !panelElem.SetAttribute("style", "none"))
+            return false;
+        // Item container
+        XMLElement containerElem = panelElem.GetChild("element");
+        if (containerElem)
+        {
+            if (containerElem.GetAttribute("style").Empty() && !containerElem.SetAttribute("style", "none"))
+                return false;
+        }
+    }
 
     return true;
 }
@@ -324,7 +323,7 @@ void DropDownList::HandleItemClicked(StringHash eventType, VariantMap& eventData
 
     // Close and defocus the popup. This will actually send the selection forward
     if (listView_->HasFocus())
-        GetSubsystem<UI>()->SetFocusElement(focusMode_ < FM_FOCUSABLE ? 0 : this);
+        GetSubsystem<UI>()->SetFocusElement(focusMode_ < FM_FOCUSABLE ? nullptr : this);
     ShowPopup(false);
 }
 
@@ -336,6 +335,12 @@ void DropDownList::HandleListViewKey(StringHash eventType, VariantMap& eventData
     int key = eventData[P_KEY].GetInt();
     if (key == KEY_RETURN || key == KEY_RETURN2 || key == KEY_KP_ENTER)
         HandleItemClicked(eventType, eventData);
+}
+
+void DropDownList::HandleSelectionChanged(StringHash eventType, VariantMap& eventData)
+{
+    // Display the place holder text when there is no selection, however, the place holder text is only visible when the place holder itself is set to visible
+    placeholder_->GetChild(0)->SetVisible(GetSelection() == M_MAX_UNSIGNED);
 }
 
 }

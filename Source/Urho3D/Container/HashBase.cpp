@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // THE SOFTWARE.
 //
 
-#include "../Container/HashBase.h"
+#include "../Precompiled.h"
 
 #include "../DebugNew.h"
 
@@ -29,15 +29,14 @@ namespace Urho3D
 
 void HashBase::AllocateBuckets(unsigned size, unsigned numBuckets)
 {
-    if (ptrs_)
-        delete[] ptrs_;
-    
-    HashNodeBase** ptrs = new HashNodeBase*[numBuckets + 2];
-    unsigned* data = reinterpret_cast<unsigned*>(ptrs);
+    delete[] ptrs_;
+
+    auto ptrs = new HashNodeBase* [numBuckets + 2];
+    auto* data = reinterpret_cast<unsigned*>(ptrs);
     data[0] = size;
     data[1] = numBuckets;
     ptrs_ = ptrs;
-    
+
     ResetPtrs();
 }
 
@@ -46,11 +45,11 @@ void HashBase::ResetPtrs()
     // Reset bucket pointers
     if (!ptrs_)
         return;
-    
+
     unsigned numBuckets = NumBuckets();
     HashNodeBase** ptrs = Ptrs();
     for (unsigned i = 0; i < numBuckets; ++i)
-        ptrs[i] = 0;
+        ptrs[i] = nullptr;
 }
 
 }

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,10 @@
 // THE SOFTWARE.
 //
 
-#include <Urho3D/Urho3D.h>
-
-#include <Urho3D/Input/Controls.h>
 #include <Urho3D/Graphics/Graphics.h>
-#include <Urho3D/Input/Input.h>
 #include <Urho3D/Graphics/Renderer.h>
+#include <Urho3D/Input/Controls.h>
+#include <Urho3D/Input/Input.h>
 
 #include "Character.h"
 #include "Touch.h"
@@ -41,15 +39,13 @@ Touch::Touch(Context* context, float touchSensitivity) :
 {
 }
 
-Touch::~Touch()
-{
-}
+Touch::~Touch() = default;
 
 void Touch::UpdateTouches(Controls& controls) // Called from HandleUpdate
 {
     zoom_ = false; // reset bool
 
-    Input* input = GetSubsystem<Input>();
+    auto* input = GetSubsystem<Input>();
 
     // Zoom in/out
     if (input->GetNumTouches() == 2)

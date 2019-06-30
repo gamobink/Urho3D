@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,32 +20,28 @@
 // THE SOFTWARE.
 //
 
-#include <Urho3D/Urho3D.h>
-
+#include <Urho3D/Core/CoreEvents.h>
+#include <Urho3D/Core/ProcessUtils.h>
+#include <Urho3D/Engine/Engine.h>
 #include <Urho3D/Graphics/AnimatedModel.h>
 #include <Urho3D/Graphics/AnimationController.h>
 #include <Urho3D/Graphics/Camera.h>
-#include <Urho3D/Physics/CollisionShape.h>
-#include <Urho3D/Input/Controls.h>
-#include <Urho3D/Core/CoreEvents.h>
-#include <Urho3D/Engine/Engine.h>
-#include <Urho3D/IO/FileSystem.h>
-#include <Urho3D/UI/Font.h>
-#include <Urho3D/Input/Input.h>
 #include <Urho3D/Graphics/Light.h>
 #include <Urho3D/Graphics/Material.h>
-#include <Urho3D/Graphics/Model.h>
 #include <Urho3D/Graphics/Octree.h>
-#include <Urho3D/Physics/PhysicsWorld.h>
-#include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Graphics/Renderer.h>
+#include <Urho3D/Graphics/Zone.h>
+#include <Urho3D/Input/Controls.h>
+#include <Urho3D/Input/Input.h>
+#include <Urho3D/IO/FileSystem.h>
+#include <Urho3D/Physics/CollisionShape.h>
+#include <Urho3D/Physics/PhysicsWorld.h>
 #include <Urho3D/Physics/RigidBody.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Scene.h>
-#include <Urho3D/Graphics/StaticModel.h>
+#include <Urho3D/UI/Font.h>
 #include <Urho3D/UI/Text.h>
 #include <Urho3D/UI/UI.h>
-#include <Urho3D/Graphics/Zone.h>
 
 #include "Character.h"
 #include "CharacterDemo.h"
@@ -53,7 +49,7 @@
 
 #include <Urho3D/DebugNew.h>
 
-DEFINE_APPLICATION_MAIN(CharacterDemo)
+URHO3D_DEFINE_APPLICATION_MAIN(CharacterDemo)
 
 CharacterDemo::CharacterDemo(Context* context) :
     Sample(context),
@@ -63,9 +59,7 @@ CharacterDemo::CharacterDemo(Context* context) :
     Character::RegisterObject(context);
 }
 
-CharacterDemo::~CharacterDemo()
-{
-}
+CharacterDemo::~CharacterDemo() = default;
 
 void CharacterDemo::Start()
 {
@@ -85,11 +79,14 @@ void CharacterDemo::Start()
 
     // Subscribe to necessary events
     SubscribeToEvents();
+
+    // Set the mouse mode to use in the sample
+    Sample::InitMouseMode(MM_RELATIVE);
 }
 
 void CharacterDemo::CreateScene()
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
 
     scene_ = new Scene(context_);
 
@@ -100,13 +97,13 @@ void CharacterDemo::CreateScene()
     // Create camera and define viewport. We will be doing load / save, so it's convenient to create the camera outside the scene,
     // so that it won't be destroyed and recreated, and we don't have to redefine the viewport on load
     cameraNode_ = new Node(context_);
-    Camera* camera = cameraNode_->CreateComponent<Camera>();
+    auto* camera = cameraNode_->CreateComponent<Camera>();
     camera->SetFarClip(300.0f);
     GetSubsystem<Renderer>()->SetViewport(0, new Viewport(context_, scene_, camera));
 
     // Create static scene content. First create a zone for ambient lighting and fog control
     Node* zoneNode = scene_->CreateChild("Zone");
-    Zone* zone = zoneNode->CreateComponent<Zone>();
+    auto* zone = zoneNode->CreateComponent<Zone>();
     zone->SetAmbientColor(Color(0.15f, 0.15f, 0.15f));
     zone->SetFogColor(Color(0.5f, 0.5f, 0.7f));
     zone->SetFogStart(100.0f);
@@ -116,7 +113,7 @@ void CharacterDemo::CreateScene()
     // Create a directional light with cascaded shadow mapping
     Node* lightNode = scene_->CreateChild("DirectionalLight");
     lightNode->SetDirection(Vector3(0.3f, -0.5f, 0.425f));
-    Light* light = lightNode->CreateComponent<Light>();
+    auto* light = lightNode->CreateComponent<Light>();
     light->SetLightType(LIGHT_DIRECTIONAL);
     light->SetCastShadows(true);
     light->SetShadowBias(BiasParameters(0.00025f, 0.5f));
@@ -127,15 +124,15 @@ void CharacterDemo::CreateScene()
     Node* floorNode = scene_->CreateChild("Floor");
     floorNode->SetPosition(Vector3(0.0f, -0.5f, 0.0f));
     floorNode->SetScale(Vector3(200.0f, 1.0f, 200.0f));
-    StaticModel* object = floorNode->CreateComponent<StaticModel>();
+    auto* object = floorNode->CreateComponent<StaticModel>();
     object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
     object->SetMaterial(cache->GetResource<Material>("Materials/Stone.xml"));
 
-    RigidBody* body = floorNode->CreateComponent<RigidBody>();
+    auto* body = floorNode->CreateComponent<RigidBody>();
     // Use collision layer bit 2 to mark world scenery. This is what we will raycast against to prevent camera from going
     // inside geometry
     body->SetCollisionLayer(2);
-    CollisionShape* shape = floorNode->CreateComponent<CollisionShape>();
+    auto* shape = floorNode->CreateComponent<CollisionShape>();
     shape->SetBox(Vector3::ONE);
 
     // Create mushrooms of varying sizes
@@ -146,14 +143,14 @@ void CharacterDemo::CreateScene()
         objectNode->SetPosition(Vector3(Random(180.0f) - 90.0f, 0.0f, Random(180.0f) - 90.0f));
         objectNode->SetRotation(Quaternion(0.0f, Random(360.0f), 0.0f));
         objectNode->SetScale(2.0f + Random(5.0f));
-        StaticModel* object = objectNode->CreateComponent<StaticModel>();
+        auto* object = objectNode->CreateComponent<StaticModel>();
         object->SetModel(cache->GetResource<Model>("Models/Mushroom.mdl"));
         object->SetMaterial(cache->GetResource<Material>("Materials/Mushroom.xml"));
         object->SetCastShadows(true);
 
-        RigidBody* body = objectNode->CreateComponent<RigidBody>();
+        auto* body = objectNode->CreateComponent<RigidBody>();
         body->SetCollisionLayer(2);
-        CollisionShape* shape = objectNode->CreateComponent<CollisionShape>();
+        auto* shape = objectNode->CreateComponent<CollisionShape>();
         shape->SetTriangleMesh(object->GetModel(), 0);
     }
 
@@ -167,39 +164,43 @@ void CharacterDemo::CreateScene()
         objectNode->SetPosition(Vector3(Random(180.0f) - 90.0f, Random(10.0f) + 10.0f, Random(180.0f) - 90.0f));
         objectNode->SetRotation(Quaternion(Random(360.0f), Random(360.0f), Random(360.0f)));
         objectNode->SetScale(scale);
-        StaticModel* object = objectNode->CreateComponent<StaticModel>();
+        auto* object = objectNode->CreateComponent<StaticModel>();
         object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
         object->SetMaterial(cache->GetResource<Material>("Materials/Stone.xml"));
         object->SetCastShadows(true);
 
-        RigidBody* body = objectNode->CreateComponent<RigidBody>();
+        auto* body = objectNode->CreateComponent<RigidBody>();
         body->SetCollisionLayer(2);
         // Bigger boxes will be heavier and harder to move
         body->SetMass(scale * 2.0f);
-        CollisionShape* shape = objectNode->CreateComponent<CollisionShape>();
+        auto* shape = objectNode->CreateComponent<CollisionShape>();
         shape->SetBox(Vector3::ONE);
     }
 }
 
 void CharacterDemo::CreateCharacter()
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
 
     Node* objectNode = scene_->CreateChild("Jack");
     objectNode->SetPosition(Vector3(0.0f, 1.0f, 0.0f));
 
+    // spin node
+    Node* adjustNode = objectNode->CreateChild("AdjNode");
+    adjustNode->SetRotation( Quaternion(180, Vector3(0,1,0) ) );
+
     // Create the rendering component + animation controller
-    AnimatedModel* object = objectNode->CreateComponent<AnimatedModel>();
-    object->SetModel(cache->GetResource<Model>("Models/Jack.mdl"));
-    object->SetMaterial(cache->GetResource<Material>("Materials/Jack.xml"));
+    auto* object = adjustNode->CreateComponent<AnimatedModel>();
+    object->SetModel(cache->GetResource<Model>("Models/Mutant/Mutant.mdl"));
+    object->SetMaterial(cache->GetResource<Material>("Models/Mutant/Materials/mutant_M.xml"));
     object->SetCastShadows(true);
-    objectNode->CreateComponent<AnimationController>();
+    adjustNode->CreateComponent<AnimationController>();
 
     // Set the head bone for manual control
-    object->GetSkeleton().GetBone("Bip01_Head")->animated_ = false;
+    object->GetSkeleton().GetBone("Mutant:Head")->animated_ = false;
 
     // Create rigidbody, and set non-zero mass so that the body becomes dynamic
-    RigidBody* body = objectNode->CreateComponent<RigidBody>();
+    auto* body = objectNode->CreateComponent<RigidBody>();
     body->SetCollisionLayer(1);
     body->SetMass(1.0f);
 
@@ -211,7 +212,7 @@ void CharacterDemo::CreateCharacter()
     body->SetCollisionEventMode(COLLISION_ALWAYS);
 
     // Set a capsule shape for collision
-    CollisionShape* shape = objectNode->CreateComponent<CollisionShape>();
+    auto* shape = objectNode->CreateComponent<CollisionShape>();
     shape->SetCapsule(0.7f, 1.8f, Vector3(0.0f, 0.9f, 0.0f));
 
     // Create the character logic component, which takes care of steering the rigidbody
@@ -222,11 +223,11 @@ void CharacterDemo::CreateCharacter()
 
 void CharacterDemo::CreateInstructions()
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
-    UI* ui = GetSubsystem<UI>();
+    auto* cache = GetSubsystem<ResourceCache>();
+    auto* ui = GetSubsystem<UI>();
 
     // Construct new Text object, set string to display and font to use
-    Text* instructionText = ui->GetRoot()->CreateChild<Text>();
+    auto* instructionText = ui->GetRoot()->CreateChild<Text>();
     instructionText->SetText(
         "Use WASD keys and mouse/touch to move\n"
         "Space to jump, F to toggle 1st/3rd person\n"
@@ -245,10 +246,10 @@ void CharacterDemo::CreateInstructions()
 void CharacterDemo::SubscribeToEvents()
 {
     // Subscribe to Update event for setting the character controls before physics simulation
-    SubscribeToEvent(E_UPDATE, HANDLER(CharacterDemo, HandleUpdate));
+    SubscribeToEvent(E_UPDATE, URHO3D_HANDLER(CharacterDemo, HandleUpdate));
 
     // Subscribe to PostUpdate event for updating the camera position after physics simulation
-    SubscribeToEvent(E_POSTUPDATE, HANDLER(CharacterDemo, HandlePostUpdate));
+    SubscribeToEvent(E_POSTUPDATE, URHO3D_HANDLER(CharacterDemo, HandlePostUpdate));
 
     // Unsubscribe the SceneUpdate event from base class as the camera node is being controlled in HandlePostUpdate() in this sample
     UnsubscribeFromEvent(E_SCENEUPDATE);
@@ -258,7 +259,7 @@ void CharacterDemo::HandleUpdate(StringHash eventType, VariantMap& eventData)
 {
     using namespace Update;
 
-    Input* input = GetSubsystem<Input>();
+    auto* input = GetSubsystem<Input>();
 
     if (character_)
     {
@@ -270,15 +271,15 @@ void CharacterDemo::HandleUpdate(StringHash eventType, VariantMap& eventData)
             touch_->UpdateTouches(character_->controls_);
 
         // Update controls using keys
-        UI* ui = GetSubsystem<UI>();
+        auto* ui = GetSubsystem<UI>();
         if (!ui->GetFocusElement())
         {
             if (!touch_ || !touch_->useGyroscope_)
             {
-                character_->controls_.Set(CTRL_FORWARD, input->GetKeyDown('W'));
-                character_->controls_.Set(CTRL_BACK, input->GetKeyDown('S'));
-                character_->controls_.Set(CTRL_LEFT, input->GetKeyDown('A'));
-                character_->controls_.Set(CTRL_RIGHT, input->GetKeyDown('D'));
+                character_->controls_.Set(CTRL_FORWARD, input->GetKeyDown(KEY_W));
+                character_->controls_.Set(CTRL_BACK, input->GetKeyDown(KEY_S));
+                character_->controls_.Set(CTRL_LEFT, input->GetKeyDown(KEY_A));
+                character_->controls_.Set(CTRL_RIGHT, input->GetKeyDown(KEY_D));
             }
             character_->controls_.Set(CTRL_JUMP, input->GetKeyDown(KEY_SPACE));
 
@@ -290,11 +291,11 @@ void CharacterDemo::HandleUpdate(StringHash eventType, VariantMap& eventData)
                     TouchState* state = input->GetTouch(i);
                     if (!state->touchedElement_)    // Touch on empty space
                     {
-                        Camera* camera = cameraNode_->GetComponent<Camera>();
+                        auto* camera = cameraNode_->GetComponent<Camera>();
                         if (!camera)
                             return;
 
-                        Graphics* graphics = GetSubsystem<Graphics>();
+                        auto* graphics = GetSubsystem<Graphics>();
                         character_->controls_.yaw_ += TOUCH_SENSITIVITY * camera->GetFov() / graphics->GetHeight() * state->delta_.x_;
                         character_->controls_.pitch_ += TOUCH_SENSITIVITY * camera->GetFov() / graphics->GetHeight() * state->delta_.y_;
                     }
@@ -307,13 +308,15 @@ void CharacterDemo::HandleUpdate(StringHash eventType, VariantMap& eventData)
             }
             // Limit pitch
             character_->controls_.pitch_ = Clamp(character_->controls_.pitch_, -80.0f, 80.0f);
+            // Set rotation already here so that it's updated every rendering frame instead of every physics frame
+            character_->GetNode()->SetRotation(Quaternion(character_->controls_.yaw_, Vector3::UP));
 
             // Switch between 1st and 3rd person
-            if (input->GetKeyPress('F'))
+            if (input->GetKeyPress(KEY_F))
                 firstPerson_ = !firstPerson_;
 
             // Turn on/off gyroscope on mobile platform
-            if (touch_ && input->GetKeyPress('G'))
+            if (touch_ && input->GetKeyPress(KEY_G))
                 touch_->useGyroscope_ = !touch_->useGyroscope_;
 
             // Check for loading / saving the scene
@@ -333,9 +336,6 @@ void CharacterDemo::HandleUpdate(StringHash eventType, VariantMap& eventData)
                     character_ = characterNode->GetComponent<Character>();
             }
         }
-
-        // Set rotation already here so that it's updated every rendering frame instead of every physics frame
-        character_->GetNode()->SetRotation(Quaternion(character_->controls_.yaw_, Vector3::UP));
     }
 }
 
@@ -347,18 +347,16 @@ void CharacterDemo::HandlePostUpdate(StringHash eventType, VariantMap& eventData
     Node* characterNode = character_->GetNode();
 
     // Get camera lookat dir from character yaw + pitch
-    Quaternion rot = characterNode->GetRotation();
+    const Quaternion& rot = characterNode->GetRotation();
     Quaternion dir = rot * Quaternion(character_->controls_.pitch_, Vector3::RIGHT);
 
     // Turn head to camera pitch, but limit to avoid unnatural animation
-    Node* headNode = characterNode->GetChild("Bip01_Head", true);
+    Node* headNode = characterNode->GetChild("Mutant:Head", true);
     float limitPitch = Clamp(character_->controls_.pitch_, -45.0f, 45.0f);
     Quaternion headDir = rot * Quaternion(limitPitch, Vector3(1.0f, 0.0f, 0.0f));
     // This could be expanded to look at an arbitrary target, now just look at a point in front
-    Vector3 headWorldTarget = headNode->GetWorldPosition() + headDir * Vector3(0.0f, 0.0f, 1.0f);
+    Vector3 headWorldTarget = headNode->GetWorldPosition() + headDir * Vector3(0.0f, 0.0f, -1.0f);
     headNode->LookAt(headWorldTarget, Vector3(0.0f, 1.0f, 0.0f));
-    // Correct head orientation because LookAt assumes Z = forward, but the bone has been authored differently (Y = forward)
-    headNode->Rotate(Quaternion(0.0f, 90.0f, 90.0f));
 
     if (firstPerson_)
     {

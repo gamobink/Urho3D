@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "../Graphics/GraphicsDefs.h"
 #include "../Resource/Resource.h"
 
 namespace Urho3D
@@ -30,8 +31,11 @@ namespace Urho3D
 /// Particle emitter shapes.
 enum EmitterType
 {
-    EMITTER_SPHERE,
-    EMITTER_BOX
+    EMITTER_SPHERE = 0,
+    EMITTER_BOX,
+    EMITTER_SPHEREVOLUME,
+    EMITTER_CYLINDER,
+    EMITTER_RING
 };
 
 /// %Color animation frame definition.
@@ -44,7 +48,7 @@ struct ColorFrame
     }
 
     /// Construct with a color and zero time.
-    ColorFrame(const Color& color) :
+    explicit ColorFrame(const Color& color) :
         color_(color),
         time_(0.0f)
     {
@@ -101,23 +105,23 @@ class XMLElement;
 /// %Particle effect definition.
 class URHO3D_API ParticleEffect : public Resource
 {
-    OBJECT(ParticleEffect);
+    URHO3D_OBJECT(ParticleEffect, Resource);
 
 public:
     /// Construct.
-    ParticleEffect(Context* context);
+    explicit ParticleEffect(Context* context);
     /// Destruct.
-    virtual ~ParticleEffect();
+    ~ParticleEffect() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Load resource from stream. May be called from a worker thread. Return true if successful.
-    virtual bool BeginLoad(Deserializer& source);
+    bool BeginLoad(Deserializer& source) override;
     /// Finish resource loading. Always called from the main thread. Return true if successful.
-    virtual bool EndLoad();
+    bool EndLoad() override;
     /// Save resource. Return true if successful.
-    virtual bool Save(Serializer& dest) const;
-    
+    bool Save(Serializer& dest) const override;
+
     /// Save resource to XMLElement. Return true if successful.
     bool Save(XMLElement& dest) const;
     /// Load resource from XMLElement synchronously. Return true if successful.
@@ -128,12 +132,14 @@ public:
     void SetNumParticles(unsigned num);
     /// Set whether to update when particles are not visible.
     void SetUpdateInvisible(bool enable);
-    /// Set whether billboards are relative to the scene node. Default true.
+    /// Set whether billboards are relative to the scene node.
     void SetRelative(bool enable);
-    /// Set scaled.
+    /// Set whether scene node scale affects billboards' size.
     void SetScaled(bool enable);
-    /// Set sorted.
+    /// Set whether billboards are sorted by distance.
     void SetSorted(bool enable);
+    /// Set whether billboards have fixed size on screen (measured in pixels) regardless of distance to camera.
+    void SetFixedScreenSize(bool enable);
     /// Set animation LOD bias.
     void SetAnimationLodBias(float lodBias);
     /// Set emitter type.
@@ -175,14 +181,16 @@ public:
     /// Set particle minimum rotation speed.
     void SetMinRotationSpeed(float speed);
     /// Set particle maximum rotation speed.
-    void SetMaxRotationSpeed(float speed);    
+    void SetMaxRotationSpeed(float speed);
     /// Set particle size additive modifier.
     void SetSizeAdd(float sizeAdd);
     /// Set particle size multiplicative modifier.
     void SetSizeMul(float sizeMul);
+    /// Set how the particles should rotate in relation to the camera. Default is to follow camera rotation on all axes (FC_ROTATE_XYZ.)
+    void SetFaceCameraMode(FaceCameraMode mode);
 
     /// Add a color frame sorted in the correct position based on time.
-    void AddColorTime(const Color& color, const float time);
+    void AddColorTime(const Color& color, float time);
     /// Add a color frame sorted in the correct position based on time.
     void AddColorFrame(const ColorFrame& colorFrame);
     /// Remove color frame at index
@@ -197,90 +205,132 @@ public:
     void SortColorFrames();
 
     /// Add a texture frame sorted in the correct position based on time.
-    void AddTextureTime(const Rect& uv, const float time);
+    void AddTextureTime(const Rect& uv, float time);
     /// Add a texture frame sorted in the correct position based on time.
     void AddTextureFrame(const TextureFrame& textureFrame);
     /// Remove texture frame at index
     void RemoveTextureFrame(unsigned index);
     /// Set particle texture animation.
-    void SetTextureFrames(const Vector<TextureFrame>& animation);
+    void SetTextureFrames(const Vector<TextureFrame>& textureFrames);
     /// Set number of texture animation frames.
     void SetTextureFrame(unsigned index, const TextureFrame& textureFrame);
     /// Set number of texture frames.
     void SetNumTextureFrames(unsigned number);
     /// Sort the list of texture frames based on time.
     void SortTextureFrames();
+    /// Clone the particle effect.
+    SharedPtr<ParticleEffect> Clone(const String& cloneName = String::EMPTY) const;
 
     /// Return material.
     Material* GetMaterial() const { return material_; }
+
     /// Return maximum number of particles.
     unsigned GetNumParticles() const { return numParticles_; }
+
     /// Return whether to update when particles are not visible.
     bool GetUpdateInvisible() const { return updateInvisible_; }
+
     /// Return whether billboards are relative to the scene node.
     bool IsRelative() const { return relative_; }
+
     /// Return whether scene node scale affects billboards' size.
     bool IsScaled() const { return scaled_; }
+
     /// Return whether billboards are sorted.
     bool IsSorted() const { return sorted_; }
+
+    /// Return whether billboards are fixed screen size.
+    bool IsFixedScreenSize() const { return fixedScreenSize_; }
+
     /// Return animation Lod bias.
     float GetAnimationLodBias() const { return animationLodBias_; }
+
     /// Return emitter type.
     EmitterType GetEmitterType() const { return emitterType_; }
+
     /// Return emitter size.
     const Vector3& GetEmitterSize() const { return emitterSize_; }
+
     /// Return negative direction limit.
     const Vector3& GetMinDirection() const { return directionMin_; }
+
     /// Return positive direction limit.
     const Vector3& GetMaxDirection() const { return directionMax_; }
+
     /// Return constant force acting on particles.
     const Vector3& GetConstantForce() const { return constantForce_; }
+
     /// Return particle velocity damping force.
     float GetDampingForce() const { return dampingForce_; }
+
     /// Return emission active period length (0 = infinite.)
     float GetActiveTime() const { return activeTime_; }
+
     /// Return emission inactive period length (0 = infinite.)
     float GetInactiveTime() const { return inactiveTime_; }
+
     /// Return minimum emission rate.
     float GetMinEmissionRate() const { return emissionRateMin_; }
+
     /// Return maximum emission rate.
     float GetMaxEmissionRate() const { return emissionRateMax_; }
+
     /// Return particle minimum size.
     const Vector2& GetMinParticleSize() const { return sizeMin_; }
+
     /// Return particle maximum size.
     const Vector2& GetMaxParticleSize() const { return sizeMax_; }
+
     /// Return particle minimum time to live.
     float GetMinTimeToLive() const { return timeToLiveMin_; }
+
     /// Return particle maximum time to live.
     float GetMaxTimeToLive() const { return timeToLiveMax_; }
+
     /// Return particle minimum velocity.
     float GetMinVelocity() const { return velocityMin_; }
+
     /// Return particle maximum velocity.
     float GetMaxVelocity() const { return velocityMax_; }
+
     /// Return particle minimum rotation.
     float GetMinRotation() const { return rotationMin_; }
+
     /// Return particle maximum rotation.
     float GetMaxRotation() const { return rotationMax_; }
+
     /// Return particle minimum rotation speed.
     float GetMinRotationSpeed() const { return rotationSpeedMin_; }
+
     /// Return particle maximum rotation speed.
-    float GetMaxRotationSpeed() const { return rotationSpeedMax_; }   
+    float GetMaxRotationSpeed() const { return rotationSpeedMax_; }
+
     /// Return particle size additive modifier.
     float GetSizeAdd() const { return sizeAdd_; }
+
     /// Return particle size multiplicative modifier.
     float GetSizeMul() const { return sizeMul_; }
+
     /// Return all color animation frames.
     const Vector<ColorFrame>& GetColorFrames() const { return colorFrames_; }
+
     /// Return number of color animation frames.
     unsigned GetNumColorFrames() const { return colorFrames_.Size(); }
+
     /// Return a color animation frame, or null if outside range.
     const ColorFrame* GetColorFrame(unsigned index) const;
+
     /// Return all texture animation frames.
     const Vector<TextureFrame>& GetTextureFrames() const { return textureFrames_; }
+
     /// Return number of texture animation frames.
     unsigned GetNumTextureFrames() const { return textureFrames_.Size(); }
+
     /// Return a texture animation frame, or null if outside range.
     const TextureFrame* GetTextureFrame(unsigned index) const;
+
+    /// Return how the particles rotate in relation to the camera.
+    FaceCameraMode GetFaceCameraMode() const { return faceCameraMode_; }
 
     /// Return random direction.
     Vector3 GetRandomDirection() const;
@@ -315,6 +365,8 @@ private:
     bool scaled_;
     /// Billboards sorted flag.
     bool sorted_;
+    /// Billboards fixed screen size flag.
+    bool fixedScreenSize_;
     /// Animation LOD bias.
     float animationLodBias_;
     /// Emitter shape.
@@ -367,6 +419,8 @@ private:
     Vector<TextureFrame> textureFrames_;
     /// Material name acquired during BeginLoad().
     String loadMaterialName_;
+    /// Particle rotation mode in relation to the camera.
+    FaceCameraMode faceCameraMode_;
 };
 
 }

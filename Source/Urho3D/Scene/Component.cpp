@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,29 +20,47 @@
 // THE SOFTWARE.
 //
 
-#include "../Scene/Component.h"
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
+#include "../Resource/JSONValue.h"
+#include "../Scene/Component.h"
 #include "../Scene/ReplicationState.h"
 #include "../Scene/Scene.h"
 #include "../Scene/SceneEvents.h"
+#ifdef URHO3D_PHYSICS
+#include "../Physics/PhysicsWorld.h"
+#endif
+#ifdef URHO3D_URHO2D
+#include "../Urho2D/PhysicsWorld2D.h"
+#endif
 
 #include "../DebugNew.h"
+
+#ifdef _MSC_VER
+#pragma warning(disable:6293)
+#endif
 
 namespace Urho3D
 {
 
+const char* autoRemoveModeNames[] = {
+    "Disabled",
+    "Component",
+    "Node",
+    nullptr
+};
+
 Component::Component(Context* context) :
     Animatable(context),
-    node_(0),
+    node_(nullptr),
     id_(0),
     networkUpdate_(false),
     enabled_(true)
 {
 }
 
-Component::~Component()
-{
-}
+Component::~Component() = default;
 
 bool Component::Save(Serializer& dest) const
 {
@@ -61,16 +79,26 @@ bool Component::SaveXML(XMLElement& dest) const
     // Write type and ID
     if (!dest.SetString("type", GetTypeName()))
         return false;
-    if (!dest.SetInt("id", id_))
+    if (!dest.SetUInt("id", id_))
         return false;
 
     // Write attributes
     return Animatable::SaveXML(dest);
 }
 
+bool Component::SaveJSON(JSONValue& dest) const
+{
+    // Write type and ID
+    dest.Set("type", GetTypeName());
+    dest.Set("id", id_);
+
+    // Write attributes
+    return Animatable::SaveJSON(dest);
+}
+
 void Component::MarkNetworkUpdate()
 {
-    if (!networkUpdate_ && id_ < FIRST_LOCAL_ID)
+    if (!networkUpdate_ && IsReplicated())
     {
         Scene* scene = GetScene();
         if (scene)
@@ -119,9 +147,14 @@ void Component::Remove()
         node_->RemoveComponent(this);
 }
 
+bool Component::IsReplicated() const
+{
+    return Scene::IsReplicatedID(id_);
+}
+
 Scene* Component::GetScene() const
 {
-    return node_ ? node_->GetScene() : 0;
+    return node_ ? node_->GetScene() : nullptr;
 }
 
 void Component::AddReplicationState(ComponentReplicationState* state)
@@ -143,16 +176,6 @@ void Component::PrepareNetworkUpdate()
 
     unsigned numAttributes = attributes->Size();
 
-    if (networkState_->currentValues_.Size() != numAttributes)
-    {
-        networkState_->currentValues_.Resize(numAttributes);
-        networkState_->previousValues_.Resize(numAttributes);
-
-        // Copy the default attribute values to the previous state as a starting point
-        for (unsigned i = 0; i < numAttributes; ++i)
-            networkState_->previousValues_[i] = attributes->At(i).defaultValue_;
-    }
-
     // Check for attribute changes
     for (unsigned i = 0; i < numAttributes; ++i)
     {
@@ -168,10 +191,10 @@ void Component::PrepareNetworkUpdate()
             networkState_->previousValues_[i] = networkState_->currentValues_[i];
 
             // Mark the attribute dirty in all replication states that are tracking this component
-            for (PODVector<ReplicationState*>::Iterator j = networkState_->replicationStates_.Begin(); j !=
-                networkState_->replicationStates_.End(); ++j)
+            for (PODVector<ReplicationState*>::Iterator j = networkState_->replicationStates_.Begin();
+                 j != networkState_->replicationStates_.End(); ++j)
             {
-                ComponentReplicationState* compState = static_cast<ComponentReplicationState*>(*j);
+                auto* compState = static_cast<ComponentReplicationState*>(*j);
                 compState->dirtyAttributes_.Set(i);
 
                 // Add component's parent node to the dirty set if not added yet
@@ -203,7 +226,7 @@ void Component::CleanupConnection(Connection* connection)
 void Component::OnAttributeAnimationAdded()
 {
     if (attributeAnimationInfos_.Size() == 1)
-        SubscribeToEvent(GetScene(), E_ATTRIBUTEANIMATIONUPDATE, HANDLER(Component, HandleAttributeAnimationUpdate));
+        SubscribeToEvent(GetScene(), E_ATTRIBUTEANIMATIONUPDATE, URHO3D_HANDLER(Component, HandleAttributeAnimationUpdate));
 }
 
 void Component::OnAttributeAnimationRemoved()
@@ -213,6 +236,10 @@ void Component::OnAttributeAnimationRemoved()
 }
 
 void Component::OnNodeSet(Node* node)
+{
+}
+
+void Component::OnSceneSet(Scene* scene)
 {
 }
 
@@ -237,7 +264,7 @@ void Component::SetNode(Node* node)
 
 Component* Component::GetComponent(StringHash type) const
 {
-    return node_ ? node_->GetComponent(type) : 0;
+    return node_ ? node_->GetComponent(type) : nullptr;
 }
 
 bool Component::IsEnabledEffective() const
@@ -259,4 +286,42 @@ void Component::HandleAttributeAnimationUpdate(StringHash eventType, VariantMap&
 
     UpdateAttributeAnimations(eventData[P_TIMESTEP].GetFloat());
 }
+
+Component* Component::GetFixedUpdateSource()
+{
+    Component* ret = nullptr;
+    Scene* scene = GetScene();
+
+    if (scene)
+    {
+#ifdef URHO3D_PHYSICS
+        ret = scene->GetComponent<PhysicsWorld>();
+#endif
+#ifdef URHO3D_URHO2D
+        if (!ret)
+            ret = scene->GetComponent<PhysicsWorld2D>();
+#endif
+    }
+
+    return ret;
+}
+
+void Component::DoAutoRemove(AutoRemoveMode mode)
+{
+    switch (mode)
+    {
+    case REMOVE_COMPONENT:
+        Remove();
+        return;
+
+    case REMOVE_NODE:
+        if (node_)
+            node_->Remove();
+        return;
+
+    default:
+        return;
+    }
+}
+
 }

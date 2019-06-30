@@ -276,19 +276,19 @@ UIElement@ CreateNumAttributeEditor(ListView@ list, Array<Serializable@>@ serial
 {
     UIElement@ parent = CreateAttributeEditorParent(list, info.name, index, subIndex);
     VariantType type = info.type;
-    uint numCoords = type - VAR_FLOAT + 1;
-    if (type == VAR_QUATERNION)
-        numCoords = 3;
-    else if (type == VAR_COLOR || type == VAR_INTRECT)
-        numCoords = 4;
-    else if (type == VAR_INTVECTOR2)
+    uint numCoords = 1;
+    if (type == VAR_VECTOR2 || type == VAR_INTVECTOR2)
         numCoords = 2;
+    if (type == VAR_VECTOR3 || type == VAR_INTVECTOR3 || type == VAR_QUATERNION)
+        numCoords = 3;
+    else if (type == VAR_VECTOR4 || type == VAR_COLOR || type == VAR_INTRECT || type == VAR_RECT)
+        numCoords = 4;
 
     for (uint i = 0; i < numCoords; ++i)
     {
         LineEdit@ attrEdit = CreateAttributeLineEdit(parent, serializables, index, subIndex);
         attrEdit.vars["Coordinate"] = i;
-        
+
         CreateDragSlider(attrEdit);
 
         SubscribeToEvent(attrEdit, "TextChanged", "EditAttribute");
@@ -314,7 +314,7 @@ UIElement@ CreateIntAttributeEditor(ListView@ list, Array<Serializable@>@ serial
         LineEdit@ attrEdit = CreateAttributeLineEdit(parent, serializables, index, subIndex);
         CreateDragSlider(attrEdit);
         // If the attribute is a counter for things like billboards or animation states, disable apply at each change
-        if (info.name.Find(" Count", 0, false) == -1)
+        if (info.name.Find(" Count", 0, false) == NPOS)
             SubscribeToEvent(attrEdit, "TextChanged", "EditAttribute");
         SubscribeToEvent(attrEdit, "TextFinished", "EditAttribute");
         // If the attribute is a node ID, make it a drag/drop target
@@ -379,22 +379,22 @@ UIElement@ CreateResourceRefAttributeEditor(ListView@ list, Array<Serializable@>
     {
         if ((picker.actions & ACTION_PICK) != 0)
         {
-            Button@ pickButton = CreateResourcePickerButton(container, serializables, index, subIndex, "Pick");
+            Button@ pickButton = CreateResourcePickerButton(container, serializables, index, subIndex, "smallButtonPick");
             SubscribeToEvent(pickButton, "Released", "PickResource");
         }
         if ((picker.actions & ACTION_OPEN) != 0)
         {
-            Button@ openButton = CreateResourcePickerButton(container, serializables, index, subIndex, "Open");
+            Button@ openButton = CreateResourcePickerButton(container, serializables, index, subIndex, "smallButtonOpen");
             SubscribeToEvent(openButton, "Released", "OpenResource");
         }
         if ((picker.actions & ACTION_EDIT) != 0)
         {
-            Button@ editButton = CreateResourcePickerButton(container, serializables, index, subIndex, "Edit");
+            Button@ editButton = CreateResourcePickerButton(container, serializables, index, subIndex, "smallButtonEdit");
             SubscribeToEvent(editButton, "Released", "EditResource");
         }
         if ((picker.actions & ACTION_TEST) != 0)
         {
-            Button@ testButton = CreateResourcePickerButton(container, serializables, index, subIndex, "Test");
+            Button@ testButton = CreateResourcePickerButton(container, serializables, index, subIndex, "smallButtonTest");
             SubscribeToEvent(testButton, "Released", "TestResource");
         }
     }
@@ -417,9 +417,14 @@ Button@ CreateResourcePickerButton(UIElement@ container, Array<Serializable@>@ s
     buttonText.style = "EditorAttributeText";
     buttonText.SetAlignment(HA_CENTER, VA_CENTER);
     buttonText.text = text;
+    buttonText.autoLocalizable = true;
 
     return button;
 }
+
+// Use internally for nested variant vector
+uint nestedSubIndex;
+Array<Variant>@ nestedVector;
 
 UIElement@ CreateAttributeEditor(ListView@ list, Array<Serializable@>@ serializables, const AttributeInfo&in info, uint index, uint subIndex, bool suppressedSeparatedLabel = false)
 {
@@ -430,7 +435,7 @@ UIElement@ CreateAttributeEditor(ListView@ list, Array<Serializable@>@ serializa
         parent = CreateStringAttributeEditor(list, serializables, info, index, subIndex);
     else if (type == VAR_BOOL)
         parent = CreateBoolAttributeEditor(list, serializables, info, index, subIndex);
-    else if ((type >= VAR_FLOAT && type <= VAR_VECTOR4) || type == VAR_QUATERNION || type == VAR_COLOR || type == VAR_INTVECTOR2 || type == VAR_INTRECT)
+    else if ((type >= VAR_FLOAT && type <= VAR_VECTOR4) || type == VAR_QUATERNION || type == VAR_COLOR || type == VAR_INTVECTOR2 || type == VAR_INTVECTOR3 || type == VAR_INTRECT || type == VAR_DOUBLE || type == VAR_RECT)
         parent = CreateNumAttributeEditor(list, serializables, info, index, subIndex);
     else if (type == VAR_INT)
         parent = CreateIntAttributeEditor(list, serializables, info, index, subIndex);
@@ -450,22 +455,66 @@ UIElement@ CreateAttributeEditor(ListView@ list, Array<Serializable@>@ serializa
     }
     else if (type == VAR_VARIANTVECTOR)
     {
-        VectorStruct@ vectorStruct = GetVectorStruct(serializables, index);
+        uint nameIndex = 0;
+        uint repeat = M_MAX_UNSIGNED;
+
+        VectorStruct@ vectorStruct;
+        Array<Variant>@ vector;
+        bool emptyNestedVector = false;
+        if (info.name.Contains('>'))
+        {
+            @vector = @nestedVector;
+            vectorStruct = GetNestedVectorStruct(serializables, info.name);
+            repeat = vector[subIndex].GetUInt();    // Nested VariantVector must have a predefined repeat count at the start of the vector
+            emptyNestedVector = repeat == 0;
+        }
+        else
+        {
+            @vector = serializables[0].attributes[index].GetVariantVector();
+            vectorStruct = GetVectorStruct(serializables, index);
+            subIndex = 0;
+        }
         if (vectorStruct is null)
             return null;
-        uint nameIndex = 0;
 
-        Array<Variant>@ vector = serializables[0].attributes[index].GetVariantVector();
-        for (uint i = 0; i < vector.length; ++i)
+        for (uint i = subIndex; i < vector.length; ++i)
         {
             // The individual variant in the vector is not an attribute of the serializable, the structure is reused for convenience
             AttributeInfo vectorInfo;
-            vectorInfo.name = vectorStruct.variableNames[nameIndex];
-            vectorInfo.type = vector[i].type;
+            vectorInfo.name = vectorStruct.variableNames[nameIndex++];
+            bool nested = vectorInfo.name.Contains('>');
+            if (nested)
+            {
+                vectorInfo.type = VAR_VARIANTVECTOR;
+                @nestedVector = @vector;
+            }
+            else
+                vectorInfo.type = vector[i].type;
             CreateAttributeEditor(list, serializables, vectorInfo, index, i);
-            ++nameIndex;
+            if (nested)
+            {
+                i = nestedSubIndex;
+                @nestedVector = null;
+            }
+            if (emptyNestedVector)
+            {
+                nestedSubIndex = i;
+                break;
+            }
             if (nameIndex >= vectorStruct.variableNames.length)
+            {
+                if (--repeat == 0)
+                {
+                    nestedSubIndex = i;
+                    break;
+                }
                 nameIndex = vectorStruct.restartIndex;
+
+                // Create small divider for repeated instances
+                UIElement@ divider = UIElement();
+                divider.SetFixedHeight(8);
+                list.AddItem(divider);
+            }
         }
     }
     else if (type == VAR_VARIANTMAP)
@@ -475,11 +524,13 @@ UIElement@ CreateAttributeEditor(ListView@ list, Array<Serializable@>@ serializa
         for (uint i = 0; i < keys.length; ++i)
         {
             String varName = GetVarName(keys[i]);
+            bool shouldHide = false;
+
             if (varName.empty)
             {
-                // UIElements will contain internal vars, which do not have known mappings. Skip these
+                // UIElements will contain internal vars, which do not have known mappings. Hide these
                 if (cast<UIElement>(serializables[0]) !is null)
-                    continue;
+                    shouldHide = true;
                 // Else, for scene nodes, show as hexadecimal hashes if nothing else is available
                 varName = keys[i].ToString();
             }
@@ -495,7 +546,7 @@ UIElement@ CreateAttributeEditor(ListView@ list, Array<Serializable@>@ serializa
             {
                 parent.vars["Key"] = keys[i].value;
                 // If variable name is not registered (i.e. it is an editor internal variable) then hide it
-                if (varName.empty)
+                if (varName.empty || shouldHide)
                     parent.visible = false;
             }
         }
@@ -520,6 +571,9 @@ uint GetAttributeEditorCount(Array<Serializable@>@ serializables)
             // "Is Enabled" is not inserted into the main attribute list, so do not count
             // Similarly, for UIElement, "Is Visible" is not inserted
             if (info.name == (isUIElement ? "Is Visible" : "Is Enabled"))
+                continue;
+            // Tags are also handled separately
+            if (info.name == "Tags")
                 continue;
             if (info.type == VAR_RESOURCEREFLIST)
                 count += serializables[0].attributes[i].GetResourceRefList().length;
@@ -596,7 +650,7 @@ void LoadAttributeEditor(UIElement@ parent, const Variant&in value, const Attrib
     }
 
     VariantType type = info.type;
-    if (type == VAR_FLOAT || type == VAR_STRING || type == VAR_BUFFER)
+    if (type == VAR_FLOAT || type == VAR_DOUBLE || type == VAR_STRING || type == VAR_BUFFER)
         SetEditable(SetValue(parent.children[1], value.ToString(), sameValue), editable && sameValue);
     else if (type == VAR_BOOL)
         SetEditable(SetValue(parent.children[1], value.GetBool(), sameValue), editable && sameValue);
@@ -633,8 +687,8 @@ void LoadAttributeEditor(UIElement@ parent, const Variant&in value, const Attrib
                 // Reevaluate each name in the list
                 for (uint i = 0; i < values.length; ++i)
                 {
-                    ResourceRefList refList = values[i].GetResourceRefList();
-                    if (subIndex >= refList.length || refList.names[subIndex] != firstName)
+                    ResourceRefList rList = values[i].GetResourceRefList();
+                    if (subIndex >= rList.length || rList.names[subIndex] != firstName)
                     {
                         nameSameValue = false;
                         break;
@@ -655,28 +709,28 @@ void LoadAttributeEditor(UIElement@ parent, const Variant&in value, const Attrib
                 break;
 
             Variant firstValue = vector[subIndex];
-            bool sameValue = true;
+            bool sameVal = true;
             Array<Variant> varValues;
 
             // Reevaluate each variant in the vector
             for (uint i = 0; i < values.length; ++i)
             {
-                Array<Variant>@ vector = values[i].GetVariantVector();
-                if (subIndex < vector.length)
+                Array<Variant>@ vec = values[i].GetVariantVector();
+                if (subIndex < vec.length)
                 {
-                    Variant value = vector[subIndex];
-                    varValues.Push(value);
-                    if (value != firstValue)
-                        sameValue = false;
+                    Variant v = vec[subIndex];
+                    varValues.Push(v);
+                    if (v != firstValue)
+                        sameVal = false;
                 }
                 else
-                    sameValue = false;
+                    sameVal = false;
             }
 
             // The individual variant in the list is not an attribute of the serializable, the structure is reused for convenience
-            AttributeInfo info;
-            info.type = firstValue.type;
-            LoadAttributeEditor(parent, firstValue, info, editable, sameValue, varValues);
+            AttributeInfo ai;
+            ai.type = firstValue.type;
+            LoadAttributeEditor(parent, firstValue, ai, editable, sameVal, varValues);
         }
     }
     else if (type == VAR_VARIANTMAP)
@@ -695,28 +749,28 @@ void LoadAttributeEditor(UIElement@ parent, const Variant&in value, const Attrib
                 varName = keys[subIndex].ToString(); // Use hexadecimal if nothing else is available
 
             Variant firstValue = map[keys[subIndex]];
-            bool sameValue = true;
+            bool sameVal = true;
             Array<Variant> varValues;
 
             // Reevaluate each variant in the map
             for (uint i = 0; i < values.length; ++i)
             {
-                VariantMap map = values[i].GetVariantMap();
-                if (map.Contains(keys[subIndex]))
+                VariantMap m = values[i].GetVariantMap();
+                if (m.Contains(keys[subIndex]))
                 {
-                    Variant value = map[keys[subIndex]];
-                    varValues.Push(value);
-                    if (value != firstValue)
-                       sameValue = false;
+                    Variant v = m[keys[subIndex]];
+                    varValues.Push(v);
+                    if (v != firstValue)
+                       sameVal = false;
                 }
                 else
-                    sameValue = false;
+                    sameVal = false;
             }
 
             // The individual variant in the map is not an attribute of the serializable, the structure is reused for convenience
-            AttributeInfo info;
-            info.type = firstValue.type;
-            LoadAttributeEditor(parent, firstValue, info, editable, sameValue, varValues);
+            AttributeInfo ai;
+            ai.type = firstValue.type;
+            LoadAttributeEditor(parent, firstValue, ai, editable, sameVal, varValues);
         }
     }
     else
@@ -724,31 +778,31 @@ void LoadAttributeEditor(UIElement@ parent, const Variant&in value, const Attrib
         Array<Array<String> > coordinates;
         for (uint i = 0; i < values.length; ++i)
         {
-            Variant value = values[i];
+            Variant v = values[i];
 
             // Convert Quaternion value to Vector3 value first
             if (type == VAR_QUATERNION)
-                value = value.GetQuaternion().eulerAngles;
+                v = v.GetQuaternion().eulerAngles;
 
-            coordinates.Push(value.ToString().Split(' '));
+            coordinates.Push(v.ToString().Split(' '));
         }
         for (uint i = 0; i < coordinates[0].length; ++i)
         {
-            String value = coordinates[0][i];
+            String str = coordinates[0][i];
             bool coordinateSameValue = true;
             if (!sameValue)
             {
                 // Reevaluate each coordinate
                 for (uint j = 1; j < coordinates.length; ++j)
                 {
-                    if (coordinates[j][i] != value)
+                    if (coordinates[j][i] != str)
                     {
                         coordinateSameValue = false;
                         break;
                     }
                 }
             }
-            SetEditable(SetValue(parent.children[i + 1], value, coordinateSameValue), editable && coordinateSameValue);
+            SetEditable(SetValue(parent.children[i + 1], str, coordinateSameValue), editable && coordinateSameValue);
         }
     }
 }
@@ -783,7 +837,6 @@ void StoreAttributeEditor(UIElement@ parent, Array<Serializable@>@ serializables
     }
     else if (info.type == VAR_VARIANTMAP)
     {
-        VariantMap map = serializables[0].attributes[index].GetVariantMap();
         StringHash key(parent.vars["Key"].GetUInt());
         for (uint i = 0; i < serializables.length; ++i)
         {
@@ -814,10 +867,12 @@ void FillValue(Array<Variant>& values, const Variant&in value)
 
 void SanitizeNumericalValue(VariantType type, String& value)
 {
-    if (type >= VAR_FLOAT && type <= VAR_COLOR)
+    if ((type >= VAR_FLOAT && type <= VAR_COLOR) || type == VAR_RECT)
         value = String(value.ToFloat());
-    else if (type == VAR_INT || type == VAR_INTRECT || type == VAR_INTVECTOR2)
+    else if (type == VAR_INT || type == VAR_INTRECT || type == VAR_INTVECTOR2 || type == VAR_INTVECTOR3)
         value = String(value.ToInt());
+    else if (type == VAR_DOUBLE)
+        value = String(value.ToDouble());
 }
 
 void GetEditorValue(UIElement@ parent, VariantType type, Array<String>@ enumNames, uint coordinate, Array<Variant>& values)
@@ -831,11 +886,13 @@ void GetEditorValue(UIElement@ parent, VariantType type, Array<String>@ enumName
         FillValue(values, Variant(attrEdit.text.Trimmed()));
     else if (type == VAR_BOOL)
     {
-        CheckBox@ attrEdit = parent.children[1];
-        FillValue(values, Variant(attrEdit.checked));
+        CheckBox@ cb = parent.children[1];
+        FillValue(values, Variant(cb.checked));
     }
     else if (type == VAR_FLOAT)
         FillValue(values, Variant(attrEdit.text.ToFloat()));
+    else if (type == VAR_DOUBLE)
+        FillValue(values, Variant(attrEdit.text.ToDouble()));
     else if (type == VAR_QUATERNION)
     {
         float value = attrEdit.text.ToFloat();
@@ -852,16 +909,16 @@ void GetEditorValue(UIElement@ parent, VariantType type, Array<String>@ enumName
             FillValue(values, Variant(attrEdit.text.ToInt()));
         else
         {
-            DropDownList@ attrEdit = parent.children[1];
-            FillValue(values, Variant(attrEdit.selection));
+            DropDownList@ ddl = parent.children[1];
+            FillValue(values, Variant(ddl.selection));
         }
     }
     else if (type == VAR_RESOURCEREF)
     {
-        LineEdit@ attrEdit = parent.children[0];
+        LineEdit@ le = parent.children[0];
         ResourceRef ref;
-        ref.name = attrEdit.text.Trimmed();
-        ref.type = StringHash(attrEdit.vars[TYPE_VAR].GetUInt());
+        ref.name = le.text.Trimmed();
+        ref.type = StringHash(le.vars[TYPE_VAR].GetUInt());
         FillValue(values, Variant(ref));
     }
     else
@@ -924,16 +981,6 @@ void UpdateAttributes(Array<Serializable@>@ serializables, ListView@ list, bool&
         list.viewPosition = oldViewPos;
 }
 
-void EditScriptAttributes(Component@ component, uint index)
-{
-    if (component !is null && component.typeName.Contains("ScriptInstance"))
-    {
-        String hash = GetComponentAttributeHash(component, index);
-        if (!hash.empty)
-            scriptAttributes[hash] = component.attributes[index];
-    }
-}
-
 void CreateDragSlider(LineEdit@ parent)
 {
     Button@ dragSld = Button();
@@ -941,6 +988,7 @@ void CreateDragSlider(LineEdit@ parent)
     dragSld.SetFixedHeight(ATTR_HEIGHT - 3);
     dragSld.SetFixedWidth(dragSld.height);
     dragSld.SetAlignment(HA_RIGHT, VA_TOP);
+    dragSld.focusMode = FM_NOTFOCUSABLE;
     parent.AddChild(dragSld);
 
     SubscribeToEvent(dragSld, "DragBegin", "LineDragBegin");
@@ -976,30 +1024,27 @@ void EditAttribute(StringHash eventType, VariantMap& eventData)
 
     if (!dragEditAttribute)
     {
-	    // Store old values so that PostEditAttribute can create undo actions
-	    for (uint i = 0; i < serializables.length; ++i)
-		    oldValues.Push(serializables[i].attributes[index]);
+        // Store old values so that PostEditAttribute can create undo actions
+        for (uint i = 0; i < serializables.length; ++i)
+            oldValues.Push(serializables[i].attributes[index]);
     }
 
     StoreAttributeEditor(parent, serializables, index, subIndex, coordinate);
     for (uint i = 0; i < serializables.length; ++i)
-	    serializables[i].ApplyAttributes();
-    
+        serializables[i].ApplyAttributes();
+
     if (!dragEditAttribute)
     {
-	    // Do the editor post logic after attribute has been modified.
-	    PostEditAttribute(serializables, index, oldValues);
+        // Do the editor post logic after attribute has been modified.
+        PostEditAttribute(serializables, index, oldValues);
     }
-
-    // Update the stored script attributes if this is a ScriptInstance    
-    EditScriptAttributes(serializables[0], index);
 
     inEditAttribute = false;
 
     // If not an intermediate edit, reload the editor fields with validated values
     // (attributes may have interactions; therefore we load everything, not just the value being edited)
     if (!intermediateEdit)
-	    attributesDirty = true;
+        attributesDirty = true;
 }
 
 void LineDragBegin(StringHash eventType, VariantMap& eventData)
@@ -1120,13 +1165,13 @@ ResourcePicker@ resourcePicker = null;
 void InitResourcePicker()
 {
     // Fill resource picker data
-    Array<String> fontFilters = {"*.ttf", "*.otf", "*.fnt", "*.xml"};
-    Array<String> imageFilters = {"*.png", "*.jpg", "*.bmp", "*.tga"};
+    Array<String> fontFilters = {"*.ttf", "*.otf", "*.fnt", "*.xml", "*.sdf"};
+    Array<String> imageFilters = {"*.png", "*.jpg", "*.bmp", "*.tga", "*.hdr"};
     Array<String> luaFileFilters = {"*.lua", "*.luc"};
     Array<String> scriptFilters = {"*.as", "*.asc"};
     Array<String> soundFilters = {"*.wav","*.ogg"};
-    Array<String> textureFilters = {"*.dds", "*.png", "*.jpg", "*.bmp", "*.tga", "*.ktx", "*.pvr"};
-    Array<String> materialFilters = {"*.xml", "*.material"};
+    Array<String> textureFilters = {"*.dds", "*.png", "*.jpg", "*.bmp", "*.tga", "*.ktx", "*.pvr", "*.hdr"};
+    Array<String> materialFilters = {"*.xml", "*.material", "*.json"};
     Array<String> anmSetFilters = {"*.scml"};
     Array<String> pexFilters = {"*.pex"};
     Array<String> tmxFilters = {"*.tmx"};
@@ -1144,6 +1189,7 @@ void InitResourcePicker()
     resourcePickers.Push(ResourcePicker("TextureCube", "*.xml"));
     resourcePickers.Push(ResourcePicker("Texture3D", "*.xml"));
     resourcePickers.Push(ResourcePicker("XMLFile", "*.xml"));
+    resourcePickers.Push(ResourcePicker("JSONFile", "*.json"));
     resourcePickers.Push(ResourcePicker("Sprite2D", textureFilters, ACTION_PICK | ACTION_OPEN));
     resourcePickers.Push(ResourcePicker("AnimationSet2D", anmSetFilters, ACTION_PICK | ACTION_OPEN));
     resourcePickers.Push(ResourcePicker("ParticleEffect2D", pexFilters, ACTION_PICK | ACTION_OPEN));
@@ -1154,7 +1200,8 @@ ResourcePicker@ GetResourcePicker(StringHash resourceType)
 {
     for (uint i = 0; i < resourcePickers.length; ++i)
     {
-        if (resourcePickers[i].type == resourceType)
+        // TODO: refactor to use dictionary instead
+        if (resourceType == resourcePickers[i].type)
             return resourcePickers[i];
     }
     return null;
@@ -1192,7 +1239,7 @@ void PickResource(StringHash eventType, VariantMap& eventData)
     String lastPath = resourcePicker.lastPath;
     if (lastPath.empty)
         lastPath = sceneResourcePath;
-    CreateFileSelector("Pick " + resourcePicker.typeName, "OK", "Cancel", lastPath, resourcePicker.filters, resourcePicker.lastFilter);
+    CreateFileSelector(localization.Get("Pick ") + resourcePicker.typeName, "OK", "Cancel", lastPath, resourcePicker.filters, resourcePicker.lastFilter, false);
     SubscribeToEvent(uiFileSelector, "FileSelected", "PickResourceDone");
 }
 
@@ -1258,8 +1305,6 @@ void PickResourceDone(StringHash eventType, VariantMap& eventData)
             target.attributes[resourcePickIndex] = Variant(attrs);
             target.ApplyAttributes();
         }
-
-        EditScriptAttributes(target, resourcePickIndex);
     }
 
     PostEditAttribute(resourceTargets, resourcePickIndex, oldValues);
@@ -1315,7 +1360,7 @@ String GetResourceNameFromFullName(const String&in resourceName)
             continue;
         return resourceName.Substring(resourceDirs[i].length);
     }
-    
+
     return ""; // Not found
 }
 
@@ -1373,7 +1418,7 @@ void TestResource(StringHash eventType, VariantMap& eventData)
     LineEdit@ attrEdit = button.parent.children[0];
 
     StringHash resourceType(attrEdit.vars[TYPE_VAR].GetUInt());
-    
+
     // For now only Animations can be tested
     StringHash animType("Animation");
     if (resourceType == animType)
@@ -1454,40 +1499,32 @@ Array<VectorStruct@> vectorStructs;
 
 void InitVectorStructs()
 {
-    // Fill vector structure data
-    Array<String> billboardVariables = {
-        "Billboard Count",
-        "   Position",
-        "   Size",
-        "   UV Coordinates",
-        "   Color",
-        "   Rotation",
-        "   Is Enabled"
+    Array<String> crowdManagerAreaCostVariables = {
+        "   Area Count",
+        "      Cost"
     };
-    vectorStructs.Push(VectorStruct("BillboardSet", "Billboards", billboardVariables, 1));
+    vectorStructs.Push(VectorStruct("CrowdManager", "   >AreaCost", crowdManagerAreaCostVariables, 1));
+    
+    Array<String> categories = GetObjectCategories();
+    for (uint categoryIndex = 0; categoryIndex < categories.length; categoryIndex++)
+    {
+        Array<String> objectsNames = GetObjectsByCategory(categories[categoryIndex]);
+        for (uint objectIndex = 0; objectIndex < objectsNames.length; objectIndex++)
+        {
+            String objectName = objectsNames[objectIndex];
+            Array<AttributeInfo> attributes = GetObjectAttributeInfos(objectName);
 
-    Array<String> animationStateVariables = {
-        "Anim State Count",
-        "   Animation",
-        "   Start Bone",
-        "   Is Looped",
-        "   Weight",
-        "   Time",
-        "   Layer"
-    };
-    vectorStructs.Push(VectorStruct("AnimatedModel", "Animation States", animationStateVariables, 1));
-
-    Array<String> staticModelGroupInstanceVariables = {
-        "Instance Count",
-        "   NodeID"
-    };
-    vectorStructs.Push(VectorStruct("StaticModelGroup", "Instance Nodes", staticModelGroupInstanceVariables, 1));
-
-    Array<String> splinePathInstanceVariables = {
-        "Control Point Count",
-        "   NodeID"
-    };
-    vectorStructs.Push(VectorStruct("SplinePath", "Control Points", splinePathInstanceVariables, 1));
+            for (uint attributeIndex = 0; attributeIndex < attributes.length; attributeIndex++)
+            {
+                AttributeInfo attribute = attributes[attributeIndex];
+                if (attribute.type == VAR_VARIANTVECTOR and attribute.metadata.Contains("VectorStructElements"))
+                {
+                    Array<String>@ elementsNames = attribute.metadata["VectorStructElements"].GetStringVector();
+                    vectorStructs.Push(VectorStruct(objectName, attribute.name, elementsNames, 1));
+                }
+            }
+        }
+    }
 }
 
 VectorStruct@ GetVectorStruct(Array<Serializable@>@ serializables, uint index)
@@ -1501,6 +1538,16 @@ VectorStruct@ GetVectorStruct(Array<Serializable@>@ serializables, uint index)
     return null;
 }
 
+VectorStruct@ GetNestedVectorStruct(Array<Serializable@>@ serializables, const String&in name)
+{
+    for (uint i = 0; i < vectorStructs.length; ++i)
+    {
+        if (vectorStructs[i].componentTypeName == serializables[0].typeName && vectorStructs[i].attributeName == name)
+            return vectorStructs[i];
+    }
+    return null;
+}
+
 int GetAttributeIndex(Serializable@ serializable, const String&in attrName)
 {
     for (uint i = 0; i < serializable.numAttributes; ++i)
@@ -1508,6 +1555,6 @@ int GetAttributeIndex(Serializable@ serializable, const String&in attrName)
         if (serializable.attributeInfos[i].name.Compare(attrName, false) == 0)
             return i;
     }
-    
+
     return -1;
 }

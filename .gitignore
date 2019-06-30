@@ -1,4 +1,4 @@
-# Output directories (in case of non out-of-source)
+# Output directories
 /bin/*
 !/bin/**/
 !/bin/*.bat
@@ -11,12 +11,29 @@
 /include/
 /lib*/
 generated/
+/Source/Urho3D/tolua++-prefix/
+build/
+/captures/
+.cxx/
+
+# Output files
+/Source/**/*.a
+/Source/ThirdParty/Assimp/revision.h
+/Source/ThirdParty/Assimp/contrib/zlib/zconf.h
+/Source/ThirdParty/Assimp/include/assimp/config.h
+/Source/ThirdParty/LuaJIT/src/host/buildvm
+/Source/ThirdParty/LuaJIT/src/host/buildvm_arch.h
+/Source/ThirdParty/LuaJIT/src/host/minilua
+/Source/Urho3D/Precompiled.cpp
+/Source/Urho3D/Urho3D.h
+/Source/Urho3D/Urho3D.pc
+/Source/Urho3D/Urho3D.pc.msvc
+/Source/Urho3D/Urho3DAll.h
+/Source/Urho3D/librevision.h
 
 # Compiled shaders
-*.vs2
-*.vs3
-*.ps2
-*.ps3
+*.vs?
+*.ps?
 
 # Compiled AngelScript
 *.asc
@@ -24,12 +41,15 @@ generated/
 # Compiled Lua script
 *.luc
 
-# Generated documentation (in case of non out-of-source)
+# Generated documentation
 /Docs/html/
 /Docs/qch/
-/Docs/Doxyfile
 
-# Eclipse project settings (in case of non out-of-source)
+# Saved sample scenes
+/bin/Data/Scenes/Isometric2D.xml
+/bin/Data/Scenes/Platformer2D.xml
+
+# Eclipse project settings
 /.*project
 /.settings
 
@@ -39,28 +59,48 @@ generated/
 # Qt Creator project settings
 /CMakeLists.txt.user
 
-# Android non out-of-source project settings
-/Android/project.properties
-/Android/local.properties
-/Android/proguard-project.txt
+# JetBrains IDE project settings
+/.idea/
+/cmake-build-*/
+*.iml
 
-# Android non out-of-source build and output directories
-/Android/Urho3D/
-/Android/ThirdParty/
-/Android/libs/
+# Code::Blocks project settings
+/*.cbp
 
-# Non out-of-source CMake generated build files
+# Codelite project settings
+/*.project
+/*.workspace
+
+# Gradle project settings
+.gradle
+
+# Android project settings
+/local.properties
+
+# CMake generated build files
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/
 Makefile
 cmake_install.cmake
 install_manifest.txt
+CPackConfig.cmake
+CPackSourceConfig.cmake
+CTestTestfile.cmake
+/Source/**/*.cmake
+!/Source/ThirdParty/SDL/cmake/*.cmake
+!/Source/ThirdParty/SDL/include/*cmake
+!/Source/ThirdParty/Assimp/cmake-modules/*cmake
+/Docs/**/*.cmake
 
-# Precompiled header files (in case of non out-of-source)
+# Precompiled header files
 *.gch/
 *.pch/
 *.pch.*
+
+# Custom rake tasks
+/.rake/
+.rake_t_cache
 
 # Misc.
 configure*
@@ -70,3 +110,4 @@ configure*
 *.log
 *.bak
 Thumbs.db
+.directory

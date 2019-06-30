@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,59 +22,102 @@
 
 #pragma once
 
+#include "../Container/ArrayPtr.h"
 #include "../Resource/Resource.h"
+
+#ifdef URHO3D_SPINE
+struct spAtlas;
+struct spSkeletonData;
+struct spAnimationStateData;
+#endif
 
 namespace Urho3D
 {
 
-class Animation2D;
-class Sprite2D;
-class XMLElement;
-class XMLFile;
+namespace Spriter
+{
+    struct SpriterData;
+}
 
-/// Spriter animation set, it includes one or more animations, for more information please refer to http://www.brashmonkey.com/spriter.htm.
+class Sprite2D;
+class SpriteSheet2D;
+
+/// Spriter animation set, it includes one or more animations, for more information please refer to http://www.esotericsoftware.com and http://www.brashmonkey.com/spriter.htm.
 class URHO3D_API AnimationSet2D : public Resource
 {
-    OBJECT(AnimationSet2D);
+    URHO3D_OBJECT(AnimationSet2D, Resource);
 
 public:
     /// Construct.
-    AnimationSet2D(Context* context);
+    explicit AnimationSet2D(Context* context);
     /// Destruct.
-    virtual ~AnimationSet2D();
-    /// Register object factory. 
+    ~AnimationSet2D() override;
+    /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Load resource from stream. May be called from a worker thread. Return true if successful.
-    virtual bool BeginLoad(Deserializer& source);
+    bool BeginLoad(Deserializer& source) override;
     /// Finish resource loading. Always called from the main thread. Return true if successful.
-    virtual bool EndLoad();
+    bool EndLoad() override;
 
     /// Get number of animations.
     unsigned GetNumAnimations() const;
-    /// Return animation by index.
-    Animation2D* GetAnimation(unsigned index) const;
-    /// Return animation by name.
-    Animation2D* GetAnimation(const String& name) const;
+    /// Return animation name.
+    String GetAnimation(unsigned index) const;
+    /// Check has animation.
+    bool HasAnimation(const String& animationName) const;
+
+    /// Return sprite.
+    Sprite2D* GetSprite() const;
+
+#ifdef URHO3D_SPINE
+    /// Return spine skeleton data.
+    spSkeletonData* GetSkeletonData() const { return skeletonData_; }
+#endif
+
+    /// Return spriter data.
+    Spriter::SpriterData* GetSpriterData() const { return spriterData_.Get(); }
+    /// Return spriter file sprite.
+    Sprite2D* GetSpriterFileSprite(int folderId, int fileId) const;
 
 private:
     /// Return sprite by hash.
-    Sprite2D* GetSprite(const StringHash& hash) const;
+    Sprite2D* GetSpriterFileSprite(const StringHash& hash) const;
+#ifdef URHO3D_SPINE
+    /// Begin load spine.
+    bool BeginLoadSpine(Deserializer& source);
+    /// Finish load spine.
+    bool EndLoadSpine();
+#endif
     /// Begin load scml.
-    bool BeginLoadSpriter(Deserializer &source);
+    bool BeginLoadSpriter(Deserializer& source);
     /// Finish load scml.
     bool EndLoadSpriter();
-    /// Load spriter folders.
-    bool LoadSpriterFolders(const XMLElement& rootElem);
-    /// Load spriter animation.
-    bool LoadSpriterAnimation(const XMLElement& animationElem);
+    /// Dispose all data.
+    void Dispose();
 
-    /// Sprites.
-    HashMap<StringHash, SharedPtr<Sprite2D> > sprites_;
-    /// Animations.
-    Vector<SharedPtr<Animation2D> > animations_;
-    /// Spriter file.
-    SharedPtr<XMLFile> spriterFile_;
+    /// Spine sprite.
+    SharedPtr<Sprite2D> sprite_;
+
+#ifdef URHO3D_SPINE
+    /// Spine json data.
+    SharedArrayPtr<char> jsonData_;
+    /// Spine skeleton data.
+    spSkeletonData* skeletonData_;
+    /// Spine atlas.
+    spAtlas* atlas_;
+#endif
+
+    /// Spriter data.
+    UniquePtr<Spriter::SpriterData> spriterData_;
+    /// Has sprite sheet.
+    bool hasSpriteSheet_;
+    /// Sprite sheet file path.
+    String spriteSheetFilePath_;
+    /// Sprite sheet.
+    SharedPtr<SpriteSheet2D> spriteSheet_;
+    /// Spriter sprites.
+    HashMap<unsigned, SharedPtr<Sprite2D> > spriterFileSprites_;
 };
 
 }

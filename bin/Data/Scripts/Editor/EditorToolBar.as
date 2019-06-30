@@ -67,6 +67,12 @@ void CreateToolBar()
     fillModeGroup.AddChild(CreateToolBarToggle("FillSolid"));
     FinalizeGroupHorizontal(fillModeGroup, "ToolBarToggle");
     toolBar.AddChild(fillModeGroup);
+    
+    toolBar.AddChild(CreateToolBarSpacer(4));
+    UIElement@ originGroup = CreateGroup("OriginGroup", LM_HORIZONTAL);
+    originGroup.AddChild(CreateToolBarToggle("ShowOrigin"));
+    FinalizeGroupHorizontal(originGroup, "ToolBarToggle");
+    toolBar.AddChild(originGroup);
 
     toolBar.AddChild(CreateToolBarSpacer(4));
     DropDownList@ viewportModeList = DropDownList();
@@ -75,6 +81,7 @@ void CreateToolBar()
     viewportModeList.SetAlignment(HA_LEFT, VA_CENTER);
     toolBar.AddChild(viewportModeList);
     viewportModeList.AddItem(CreateViewPortModeText("Single", VIEWPORT_SINGLE));
+    viewportModeList.AddItem(CreateViewPortModeText("Compact", VIEWPORT_COMPACT));
     viewportModeList.AddItem(CreateViewPortModeText("Vertical Split", VIEWPORT_LEFT|VIEWPORT_RIGHT));
     viewportModeList.AddItem(CreateViewPortModeText("Horizontal Split", VIEWPORT_TOP|VIEWPORT_BOTTOM));
     viewportModeList.AddItem(CreateViewPortModeText("Quad", VIEWPORT_TOP_LEFT|VIEWPORT_TOP_RIGHT|VIEWPORT_BOTTOM_LEFT|VIEWPORT_BOTTOM_RIGHT));
@@ -123,6 +130,7 @@ void CreateToolBarIcon(UIElement@ element)
     icon.defaultStyle = iconStyle;
     icon.style = element.name;
     icon.SetFixedSize(30, 30);
+    icon.blendMode = BLEND_ALPHA;
     element.AddChild(icon);
 }
 
@@ -168,6 +176,7 @@ UIElement@ CreateToolTip(UIElement@ parent, const String&in title, const IntVect
 
     Text@ toolTipText = textHolder.CreateChild("Text");
     toolTipText.SetStyle("ToolTipText");
+    toolTipText.autoLocalizable = true;
     toolTipText.text = title;
 
     return toolTip;
@@ -379,6 +388,15 @@ void ToolBarSetViewportMode(StringHash eventType, VariantMap& eventData)
     SetViewportMode(mode);
 }
 
+void ToolBarShowOrigin(StringHash eventType, VariantMap& eventData)
+{
+    CheckBox@ edit = eventData["Element"].GetPtr();
+    
+    ShowOrigins (edit.checked);
+        
+    toolBarDirty = true;
+}
+
 void UpdateDirtyToolBar()
 {
     if (toolBar is null || !toolBarDirty)
@@ -471,6 +489,10 @@ void UpdateDirtyToolBar()
     CheckBox@ fillSolidToggle = toolBar.GetChild("FillSolid", true);
     if (fillSolidToggle.checked != (fillMode == FILL_SOLID))
         fillSolidToggle.checked = fillMode == FILL_SOLID;
+        
+    CheckBox@ showOriginToggle = toolBar.GetChild("ShowOrigin", true);
+    if (showOriginToggle.checked != (EditorOriginShow == true))
+        showOriginToggle.checked = EditorOriginShow == true;
 
     if (!subscribedToEditorToolBar)
     {
@@ -496,6 +518,7 @@ void UpdateDirtyToolBar()
         SubscribeToEvent(fillPointToggle, "Toggled", "ToolBarFillModePoint");
         SubscribeToEvent(fillWireFrameToggle, "Toggled", "ToolBarFillModeWireFrame");
         SubscribeToEvent(fillSolidToggle, "Toggled", "ToolBarFillModeSolid");
+        SubscribeToEvent(showOriginToggle, "Toggled", "ToolBarShowOrigin");
         subscribedToEditorToolBar = true;
     }
 

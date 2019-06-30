@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,11 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Thread.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -33,31 +35,33 @@
 namespace Urho3D
 {
 
-#ifdef WIN32
-DWORD WINAPI ThreadFunctionStatic(void* data)
+#ifdef URHO3D_THREADING
+#ifdef _WIN32
+
+static DWORD WINAPI ThreadFunctionStatic(void* data)
 {
     Thread* thread = static_cast<Thread*>(data);
     thread->ThreadFunction();
     return 0;
 }
+
 #else
-void* ThreadFunctionStatic(void* data)
+
+static void* ThreadFunctionStatic(void* data)
 {
-    Thread* thread = static_cast<Thread*>(data);
+    auto* thread = static_cast<Thread*>(data);
     thread->ThreadFunction();
-#ifdef EMSCRIPTEN
-// note: emscripten doesn't have this function but doesn't use threading anyway
-// so #ifdef it out to prevent linker warnings
-    pthread_exit((void*)0);
-#endif
-    return 0;
+    pthread_exit((void*)nullptr);
+    return nullptr;
 }
+
 #endif
+#endif // URHO3D_THREADING
 
 ThreadID Thread::mainThreadID;
 
 Thread::Thread() :
-    handle_(0),
+    handle_(nullptr),
     shouldRun_(false)
 {
 }
@@ -69,59 +73,60 @@ Thread::~Thread()
 
 bool Thread::Run()
 {
+#ifdef URHO3D_THREADING
     // Check if already running
     if (handle_)
         return false;
-    
+
     shouldRun_ = true;
-    #ifdef WIN32
-    handle_ = CreateThread(0, 0, ThreadFunctionStatic, this, 0, 0);
-//    #else
-    #elif !defined(EMSCRIPTEN)
-// note: emscripten doesn't have this function but doesn't use
-// threading anyway so #ifdef it out to prevent linker warnings
+#ifdef _WIN32
+    handle_ = CreateThread(nullptr, 0, ThreadFunctionStatic, this, 0, nullptr);
+#else
     handle_ = new pthread_t;
     pthread_attr_t type;
     pthread_attr_init(&type);
     pthread_attr_setdetachstate(&type, PTHREAD_CREATE_JOINABLE);
     pthread_create((pthread_t*)handle_, &type, ThreadFunctionStatic, this);
-    #endif
-    return handle_ != 0;
+#endif
+    return handle_ != nullptr;
+#else
+    return false;
+#endif // URHO3D_THREADING
 }
 
 void Thread::Stop()
 {
+#ifdef URHO3D_THREADING
     // Check if already stopped
     if (!handle_)
         return;
-    
+
     shouldRun_ = false;
-    #ifdef WIN32
+#ifdef _WIN32
     WaitForSingleObject((HANDLE)handle_, INFINITE);
     CloseHandle((HANDLE)handle_);
-//    #else
-    #elif !defined(EMSCRIPTEN)
- // note: emscripten doesn't have this function but doesn't use
- // threading anyway so #ifdef it out to prevent linker warnings
-    pthread_t* thread = (pthread_t*)handle_;
+#else
+    auto* thread = (pthread_t*)handle_;
     if (thread)
-        pthread_join(*thread, 0);
+        pthread_join(*thread, nullptr);
     delete thread;
-    #endif
-    handle_ = 0;
+#endif
+    handle_ = nullptr;
+#endif // URHO3D_THREADING
 }
 
 void Thread::SetPriority(int priority)
 {
-    #ifdef WIN32
+#ifdef URHO3D_THREADING
+#ifdef _WIN32
     if (handle_)
         SetThreadPriority((HANDLE)handle_, priority);
-    #endif
-    #if defined(__linux__) && !defined(ANDROID) && !defined(EMSCRIPTEN)
-    pthread_t* thread = (pthread_t*)handle_;
+#elif defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    auto* thread = (pthread_t*)handle_;
     if (thread)
         pthread_setschedprio(*thread, priority);
-    #endif
+#endif
+#endif // URHO3D_THREADING
 }
 
 void Thread::SetMainThread()
@@ -131,16 +136,24 @@ void Thread::SetMainThread()
 
 ThreadID Thread::GetCurrentThreadID()
 {
-    #ifdef WIN32
+#ifdef URHO3D_THREADING
+#ifdef _WIN32
     return GetCurrentThreadId();
-    #else
+#else
     return pthread_self();
-    #endif
+#endif
+#else
+    return ThreadID();
+#endif // URHO3D_THREADING
 }
 
 bool Thread::IsMainThread()
 {
+#ifdef URHO3D_THREADING
     return GetCurrentThreadID() == mainThreadID;
+#else
+    return true;
+#endif // URHO3D_THREADING
 }
 
 }

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,31 +20,23 @@
 // THE SOFTWARE.
 //
 
-#include <limits.h>
-
-#define STBRP_LARGE_RECTS
-#define STB_RECT_PACK_IMPLEMENTATION
-#include "stb_rect_pack.h"
-
-#include <Urho3D/Urho3D.h>
-
 #include <Urho3D/Core/Context.h>
-#include <Urho3D/Container/Vector.h>
 #include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Core/StringUtils.h>
-#include <Urho3D/Math/MathDefs.h>
-
-#include <Urho3D/Resource/Image.h>
-#include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/File.h>
+#include <Urho3D/IO/FileSystem.h>
+#include <Urho3D/IO/Log.h>
+#include <Urho3D/Resource/Image.h>
 #include <Urho3D/Resource/XMLElement.h>
 #include <Urho3D/Resource/XMLFile.h>
-#include <Urho3D/IO/Log.h>
-#include <Urho3D/Math/Color.h>
 
 #ifdef WIN32
 #include <windows.h>
 #endif
+
+#define STBRP_LARGE_RECTS
+#define STB_RECT_PACK_IMPLEMENTATION
+#include <STB/stb_rect_pack.h>
 
 #include <Urho3D/DebugNew.h>
 
@@ -62,30 +54,22 @@ class PackerInfo : public RefCounted
 public:
     String path;
     String name;
-    int x;
-    int y;
-    int offsetX;
-    int offsetY;
-    int width;
-    int height;
-    int frameWidth;
-    int frameHeight;
-    int frameX;
-    int frameY;
+    int x{};
+    int y{};
+    int offsetX{};
+    int offsetY{};
+    int width{};
+    int height{};
+    int frameWidth{};
+    int frameHeight{};
 
-    PackerInfo(String path_, String name_) :
+    PackerInfo(const String& path_, const String& name_) :
         path(path_),
-        name(name_),
-        x(0),
-        y(0),
-        offsetX(0),
-        offsetY(0),
-        frameX(0),
-        frameY(0)
+        name(name_)
     {
     }
 
-    ~PackerInfo() {}
+    ~PackerInfo() override = default;
 };
 
 void Help()
@@ -127,7 +111,7 @@ void Run(Vector<String>& arguments)
     SharedPtr<Context> context(new Context());
     context->RegisterSubsystem(new FileSystem(context));
     context->RegisterSubsystem(new Log(context));
-    FileSystem* fileSystem = context->GetSubsystem<FileSystem>();
+    auto* fileSystem = context->GetSubsystem<FileSystem>();
 
     Vector<String> inputFiles;
     String outputFile;
@@ -174,13 +158,13 @@ void Run(Vector<String>& arguments)
         ErrorExit("An input and output file must be specified.");
 
     if (frameWidth ^ frameHeight)
-        ErrorExit("Both frameHeight and frameWidth must be ommited or specified.");
+        ErrorExit("Both frameHeight and frameWidth must be omitted or specified.");
 
     // take last input file as output
     if (inputFiles.Size() > 1)
     {
         outputFile = inputFiles[inputFiles.Size() - 1];
-        LOGINFO("Output file set to " + outputFile + ".");
+        URHO3D_LOGINFO("Output file set to " + outputFile + ".");
         inputFiles.Erase(inputFiles.Size() - 1);
     }
 
@@ -194,7 +178,7 @@ void Run(Vector<String>& arguments)
     // check all input files exist
     for (unsigned i = 0; i < inputFiles.Size(); ++i)
     {
-        LOGINFO("Checking " + inputFiles[i] + " to see if file exists.");
+        URHO3D_LOGINFO("Checking " + inputFiles[i] + " to see if file exists.");
         if (!fileSystem->FileExists(inputFiles[i]))
             ErrorExit("File " + inputFiles[i] + " does not exist.");
     }
@@ -237,7 +221,7 @@ void Run(Vector<String>& arguments)
             {
                 for (int x = 0; x < imageWidth; ++x)
                 {
-                    bool found = (image.GetPixelInt(x, y) & 0x000000ff) != 0;
+                    bool found = (image.GetPixelInt(x, y) & 0x000000ffu) != 0;
                     if (found) {
                         minX = Min(minX, x);
                         minY = Min(minY, y);
@@ -278,11 +262,11 @@ void Run(Vector<String>& arguments)
         for(unsigned x=2; x<11; ++x)
         {
             for(unsigned y=2; y<11; ++y)
-                tries.Push(IntVector2((1<<x), (1<<y)));
+                tries.Push(IntVector2((1u<<x), (1u<<y)));
         }
 
         // load rectangles
-        stbrp_rect* packerRects = new stbrp_rect[packerInfos.Size()];
+        auto* packerRects = new stbrp_rect[packerInfos.Size()];
         for (unsigned i = 0; i < packerInfos.Size(); ++i)
         {
             PackerInfo* packerInfo = packerInfos[i];
@@ -333,18 +317,17 @@ void Run(Vector<String>& arguments)
                 packedHeight = size.y_;
             }
         }
-        delete packerRects;
+        delete[] packerRects;
         if (!success)
             ErrorExit("Could not allocate for all images.  The max sprite sheet texture size is " + String(MAX_TEXTURE_SIZE) + "x" + String(MAX_TEXTURE_SIZE) + ".");
     }
-
 
     // create image for spritesheet
     Image spriteSheetImage(context);
     spriteSheetImage.SetSize(packedWidth, packedHeight, 4);
 
     // zero out image
-    spriteSheetImage.SetData((unsigned char*)calloc(sizeof(unsigned char), packedWidth * packedHeight * 4));
+    spriteSheetImage.SetData(nullptr);
 
     XMLFile xml(context);
     XMLElement root = xml.CreateRoot("TextureAtlas");
@@ -368,7 +351,7 @@ void Run(Vector<String>& arguments)
             subTexture.SetInt("offsetY", packerInfo->offsetY);
         }
 
-        LOGINFO("Transfering " + packerInfo->path + " to sprite sheet.");
+        URHO3D_LOGINFO("Transferring " + packerInfo->path + " to sprite sheet.");
 
         File file(context, packerInfo->path);
         Image image(context);
@@ -392,7 +375,7 @@ void Run(Vector<String>& arguments)
         unsigned OUTER_BOUNDS_DEBUG_COLOR = Color::BLUE.ToUInt();
         unsigned INNER_BOUNDS_DEBUG_COLOR = Color::GREEN.ToUInt();
 
-        LOGINFO("Drawing debug information.");
+        URHO3D_LOGINFO("Drawing debug information.");
         for (unsigned i = 0; i < packerInfos.Size(); ++i)
         {
             SharedPtr<PackerInfo> packerInfo = packerInfos[i];
@@ -423,10 +406,10 @@ void Run(Vector<String>& arguments)
         }
     }
 
-    LOGINFO("Saving output image.");
+    URHO3D_LOGINFO("Saving output image.");
     spriteSheetImage.SavePNG(outputFile);
 
-    LOGINFO("Saving SpriteSheet xml file.");
+    URHO3D_LOGINFO("Saving SpriteSheet xml file.");
     File spriteSheetFile(context);
     spriteSheetFile.Open(spriteSheetFileName, FILE_WRITE);
     xml.Save(spriteSheetFile);

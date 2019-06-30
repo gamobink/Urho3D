@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,22 +20,23 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../Core/CoreEvents.h"
-#include "../IO/File.h"
-#include "../IO/IOEvents.h"
-#include "../IO/Log.h"
-#include "../Core/Mutex.h"
 #include "../Core/ProcessUtils.h"
 #include "../Core/Thread.h"
 #include "../Core/Timer.h"
+#include "../IO/File.h"
+#include "../IO/IOEvents.h"
+#include "../IO/Log.h"
 
 #include <cstdio>
 
-#ifdef ANDROID
+#ifdef __ANDROID__
 #include <android/log.h>
 #endif
-#ifdef IOS
+#if defined(IOS) || defined(TVOS)
 extern "C" void SDL_IOS_LogMessage(const char* message);
 #endif
 
@@ -46,14 +47,15 @@ namespace Urho3D
 
 const char* logLevelPrefixes[] =
 {
+    "TRACE",
     "DEBUG",
     "INFO",
     "WARNING",
     "ERROR",
-    0
+    nullptr
 };
 
-static Log* logInstance = 0;
+static Log* logInstance = nullptr;
 static bool threadErrorDisplayed = false;
 
 Log::Log(Context* context) :
@@ -68,18 +70,18 @@ Log::Log(Context* context) :
     quiet_(false)
 {
     logInstance = this;
-    
-    SubscribeToEvent(E_ENDFRAME, HANDLER(Log, HandleEndFrame));
+
+    SubscribeToEvent(E_ENDFRAME, URHO3D_HANDLER(Log, HandleEndFrame));
 }
 
 Log::~Log()
 {
-    logInstance = 0;
+    logInstance = nullptr;
 }
 
 void Log::Open(const String& fileName)
 {
-    #if !defined(ANDROID) && !defined(IOS)
+#if !defined(__ANDROID__) && !defined(IOS) && !defined(TVOS)
     if (fileName.Empty())
         return;
     if (logFile_ && logFile_->IsOpen())
@@ -98,23 +100,27 @@ void Log::Open(const String& fileName)
         logFile_.Reset();
         Write(LOG_ERROR, "Failed to create log file " + fileName);
     }
-    #endif
+#endif
 }
 
 void Log::Close()
 {
-    #if !defined(ANDROID) && !defined(IOS)
+#if !defined(__ANDROID__) && !defined(IOS) && !defined(TVOS)
     if (logFile_ && logFile_->IsOpen())
     {
         logFile_->Close();
         logFile_.Reset();
     }
-    #endif
+#endif
 }
 
 void Log::SetLevel(int level)
 {
-    assert(level >= LOG_DEBUG && level < LOG_NONE);
+    if (level < LOG_TRACE || level > LOG_NONE)
+    {
+        URHO3D_LOGERRORF("Attempted to set erroneous log level %d", level);
+        return;
+    }
 
     level_ = level;
 }
@@ -131,7 +137,16 @@ void Log::SetQuiet(bool quiet)
 
 void Log::Write(int level, const String& message)
 {
-    assert(level >= LOG_DEBUG && level < LOG_NONE);
+    // Special case for LOG_RAW level
+    if (level == LOG_RAW)
+    {
+        WriteRaw(message, false);
+        return;
+    }
+
+    // No-op if illegal level
+    if (level < LOG_TRACE || level >= LOG_NONE)
+        return;
 
     // If not in the main thread, store message for later processing
     if (!Thread::IsMainThread())
@@ -141,7 +156,7 @@ void Log::Write(int level, const String& message)
             MutexLock lock(logInstance->logMutex_);
             logInstance->threadMessages_.Push(StoredLogMessage(message, level, false));
         }
-        
+
         return;
     }
 
@@ -156,12 +171,12 @@ void Log::Write(int level, const String& message)
     if (logInstance->timeStamp_)
         formattedMessage = "[" + Time::GetTimeStamp() + "] " + formattedMessage;
 
-    #if defined(ANDROID)
-    int androidLevel = ANDROID_LOG_DEBUG + level;
+#if defined(__ANDROID__)
+    int androidLevel = ANDROID_LOG_VERBOSE + level;
     __android_log_print(androidLevel, "Urho3D", "%s", message.CString());
-    #elif defined(IOS)
+#elif defined(IOS) || defined(TVOS)
     SDL_IOS_LogMessage(message.CString());
-    #else
+#else
     if (logInstance->quiet_)
     {
         // If in quiet mode, still print the error message to the standard error stream
@@ -170,7 +185,7 @@ void Log::Write(int level, const String& message)
     }
     else
         PrintUnicodeLine(formattedMessage, level == LOG_ERROR);
-    #endif
+#endif
 
     if (logInstance->logFile_)
     {
@@ -200,27 +215,27 @@ void Log::WriteRaw(const String& message, bool error)
             MutexLock lock(logInstance->logMutex_);
             logInstance->threadMessages_.Push(StoredLogMessage(message, LOG_RAW, error));
         }
-        
+
         return;
     }
-    
+
     // Prevent recursion during log event
     if (!logInstance || logInstance->inWrite_)
         return;
 
     logInstance->lastMessage_ = message;
 
-    #if defined(ANDROID)
+#if defined(__ANDROID__)
     if (logInstance->quiet_)
     {
         if (error)
-            __android_log_print(ANDROID_LOG_ERROR, "Urho3D", message.CString());
+            __android_log_print(ANDROID_LOG_ERROR, "Urho3D", "%s", message.CString());
     }
     else
-        __android_log_print(error ? ANDROID_LOG_ERROR : ANDROID_LOG_INFO, "Urho3D", message.CString());
-    #elif defined(IOS)
+        __android_log_print(error ? ANDROID_LOG_ERROR : ANDROID_LOG_INFO, "Urho3D", "%s", message.CString());
+#elif defined(IOS) || defined(TVOS)
     SDL_IOS_LogMessage(message.CString());
-    #else
+#else
     if (logInstance->quiet_)
     {
         // If in quiet mode, still print the error message to the standard error stream
@@ -229,7 +244,7 @@ void Log::WriteRaw(const String& message, bool error)
     }
     else
         PrintUnicode(message, error);
-    #endif
+#endif
 
     if (logInstance->logFile_)
     {
@@ -263,17 +278,17 @@ void Log::HandleEndFrame(StringHash eventType, VariantMap& eventData)
     }
 
     MutexLock lock(logMutex_);
-    
+
     // Process messages accumulated from other threads (if any)
     while (!threadMessages_.Empty())
     {
         const StoredLogMessage& stored = threadMessages_.Front();
-        
+
         if (stored.level_ != LOG_RAW)
             Write(stored.level_, stored.message_);
         else
             WriteRaw(stored.message_, stored.error_);
-        
+
         threadMessages_.PopFront();
     }
 }

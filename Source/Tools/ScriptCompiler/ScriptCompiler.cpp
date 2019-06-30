@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,16 @@
 // THE SOFTWARE.
 //
 
-#include <Urho3D/Urho3D.h>
-
+#include <Urho3D/AngelScript/Script.h>
+#include <Urho3D/AngelScript/ScriptFile.h>
 #include <Urho3D/Core/Context.h>
+#include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Engine/Engine.h>
+#include <Urho3D/Engine/EngineDefs.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
-#include <Urho3D/Core/ProcessUtils.h>
 #include <Urho3D/Resource/ResourceCache.h>
-#include <Urho3D/Script/Script.h>
-#include <Urho3D/Script/ScriptFile.h>
 
 #ifdef URHO3D_LUA
 #include <Urho3D/LuaScript/LuaScript.h>
@@ -81,24 +80,24 @@ int main(int argc, char** argv)
     SharedPtr<Context> context(new Context());
     SharedPtr<Engine> engine(new Engine(context));
     context->RegisterSubsystem(new Script(context));
-    
+
     // In API dumping mode initialize the engine and instantiate LuaScript system if available so that we
     // can dump attributes from as many classes as possible
     if (dumpApiMode)
     {
         VariantMap engineParameters;
-        engineParameters["Headless"] = true;
-        engineParameters["WorkerThreads"] = false;
-        engineParameters["LogName"] = String::EMPTY;
-        engineParameters["ResourcePaths"] = String::EMPTY;
-        engineParameters["AutoloadPaths"] = String::EMPTY;
+        engineParameters[EP_HEADLESS] = true;
+        engineParameters[EP_WORKER_THREADS] = false;
+        engineParameters[EP_LOG_NAME] = String::EMPTY;
+        engineParameters[EP_RESOURCE_PATHS] = String::EMPTY;
+        engineParameters[EP_AUTOLOAD_PATHS] = String::EMPTY;
         engine->Initialize(engineParameters);
     #ifdef URHO3D_LUA
         context->RegisterSubsystem(new LuaScript(context));
     #endif
     }
-    
-    Log* log = context->GetSubsystem<Log>();
+
+    auto* log = context->GetSubsystem<Log>();
     // Register Log subsystem manually if compiled without logging support
     if (!log)
     {
@@ -114,7 +113,7 @@ int main(int argc, char** argv)
         String path, file, extension;
         SplitPath(outputFile, path, file, extension);
 
-        ResourceCache* cache = context->GetSubsystem<ResourceCache>();
+        auto* cache = context->GetSubsystem<ResourceCache>();
 
         // Add resource path to be able to resolve includes
         if (arguments.Size() > 1)

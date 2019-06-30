@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,8 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../Scene/Scene.h"
 #include "../Scene/SceneEvents.h"
@@ -39,9 +41,7 @@ SmoothedTransform::SmoothedTransform(Context* context) :
 {
 }
 
-SmoothedTransform::~SmoothedTransform()
-{
-}
+SmoothedTransform::~SmoothedTransform() = default;
 
 void SmoothedTransform::RegisterObject(Context* context)
 {
@@ -104,7 +104,7 @@ void SmoothedTransform::SetTargetPosition(const Vector3& position)
     // Subscribe to smoothing update if not yet subscribed
     if (!subscribed_)
     {
-        SubscribeToEvent(GetScene(), E_UPDATESMOOTHING, HANDLER(SmoothedTransform, HandleUpdateSmoothing));
+        SubscribeToEvent(GetScene(), E_UPDATESMOOTHING, URHO3D_HANDLER(SmoothedTransform, HandleUpdateSmoothing));
         subscribed_ = true;
     }
 
@@ -118,7 +118,7 @@ void SmoothedTransform::SetTargetRotation(const Quaternion& rotation)
 
     if (!subscribed_)
     {
-        SubscribeToEvent(GetScene(), E_UPDATESMOOTHING, HANDLER(SmoothedTransform, HandleUpdateSmoothing));
+        SubscribeToEvent(GetScene(), E_UPDATESMOOTHING, URHO3D_HANDLER(SmoothedTransform, HandleUpdateSmoothing));
         subscribed_ = true;
     }
 

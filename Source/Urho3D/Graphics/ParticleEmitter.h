@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,20 +53,20 @@ struct Particle
 /// %Particle emitter component.
 class URHO3D_API ParticleEmitter : public BillboardSet
 {
-    OBJECT(ParticleEmitter);
+    URHO3D_OBJECT(ParticleEmitter, BillboardSet);
 
 public:
     /// Construct.
-    ParticleEmitter(Context* context);
+    explicit ParticleEmitter(Context* context);
     /// Destruct.
-    virtual ~ParticleEmitter();
+    ~ParticleEmitter() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Handle enabled/disabled state change.
-    virtual void OnSetEnabled();
+    void OnSetEnabled() override;
     /// Update before octree reinsertion. Is called from a worker thread.
-    virtual void Update(const FrameInfo& frame);
+    void Update(const FrameInfo& frame) override;
 
     /// Set particle effect.
     void SetEffect(ParticleEffect* effect);
@@ -76,6 +76,8 @@ public:
     void SetEmitting(bool enable);
     /// Set whether particles should be serialized. Default true, set false to reduce scene file size.
     void SetSerializeParticles(bool enable);
+    //// Set to remove either the emitter component or its owner node from the scene automatically on particle effect completion. Disabled by default.
+    void SetAutoRemoveMode(AutoRemoveMode mode);
     /// Reset the emission period timer.
     void ResetEmissionTimer();
     /// Remove all current particles.
@@ -86,13 +88,19 @@ public:
     void ApplyEffect();
 
     /// Return particle effect.
-    ParticleEffect* GetEffect() const { return effect_; }
+    ParticleEffect* GetEffect() const;
+
     /// Return maximum number of particles.
     unsigned GetNumParticles() const { return particles_.Size(); }
+
     /// Return whether is currently emitting.
     bool IsEmitting() const { return emitting_; }
+
     /// Return whether particles are to be serialized.
     bool GetSerializeParticles() const { return serializeParticles_; }
+
+    /// Return automatic removal mode on particle effect completion.
+    AutoRemoveMode GetAutoRemoveMode() const { return autoRemove_; }
 
     /// Set particles effect attribute.
     void SetEffectAttr(const ResourceRef& value);
@@ -106,13 +114,15 @@ public:
     VariantVector GetParticleBillboardsAttr() const;
 
 protected:
-    /// Handle node being assigned.
-    virtual void OnNodeSet(Node* node);
+    /// Handle scene being assigned.
+    void OnSceneSet(Scene* scene) override;
 
     /// Create a new particle. Return true if there was room.
     bool EmitNewParticle();
     /// Return a free particle index.
     unsigned GetFreeParticle() const;
+    /// Return whether has active particles.
+    bool CheckActiveParticles() const;
 
 private:
     /// Handle scene post-update event.
@@ -138,6 +148,10 @@ private:
     bool needUpdate_;
     /// Serialize particles flag.
     bool serializeParticles_;
+    /// Ready to send effect finish event flag.
+    bool sendFinishedEvent_;
+    /// Automatic removal mode.
+    AutoRemoveMode autoRemove_;
 };
 
 }

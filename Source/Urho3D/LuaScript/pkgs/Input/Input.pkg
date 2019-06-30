@@ -5,7 +5,8 @@ enum MouseMode
 {
     MM_ABSOLUTE = 0,
     MM_RELATIVE,
-    MM_WRAP
+    MM_WRAP,
+    MM_FREE
 };
 
 struct TouchState
@@ -46,8 +47,9 @@ class Input : public Object
 {
     void SetToggleFullscreen(bool enable);
     void SetMouseVisible(bool enable, bool suppressEvent = false);
-    void SetMouseGrabbed(bool grab);
-    void SetMouseMode(MouseMode mode);
+    void SetMouseGrabbed(bool grab, bool suppressEvent = false);
+    void SetMouseMode(MouseMode mode, bool suppressEvent = false);
+    bool IsMouseLocked();
     int AddScreenJoystick(XMLFile* layoutFile = 0, XMLFile* styleFile = 0);
     bool RemoveScreenJoystick(int id);
     void SetScreenJoystickVisible(int id, bool enable);
@@ -62,32 +64,36 @@ class Input : public Object
     tolua_outside unsigned InputLoadGestures @ LoadGestures(const String fileName);
     bool RemoveGesture(unsigned gestureID);
     void RemoveAllGestures();
+    void SetMousePosition(const IntVector2& position);
+    void CenterMousePosition();
 
-    int GetKeyFromName(const String name) const;
-    int GetKeyFromScancode(int scancode) const;
-    String GetKeyName(int key) const;
-    int GetScancodeFromKey(int key) const;
-    int GetScancodeFromName(const String name) const;
-    String GetScancodeName(int scancode) const;
-    bool GetKeyDown(int key) const;
-    bool GetKeyPress(int key) const;
-    bool GetScancodeDown(int scancode) const;
-    bool GetScancodePress(int scancode) const;
-    bool GetMouseButtonDown(int button) const;
-    bool GetMouseButtonPress(int button) const;
-    bool GetQualifierDown(int qualifier) const;
-    bool GetQualifierPress(int qualifier) const;
+    Key GetKeyFromName(const String name) const;
+    Key GetKeyFromScancode(Scancode scancode) const;
+    String GetKeyName(Key key) const;
+    Scancode GetScancodeFromKey(Key key) const;
+    Scancode GetScancodeFromName(const String name) const;
+    String GetScancodeName(Scancode scancode) const;
+    bool GetKeyDown(Key key) const;
+    bool GetKeyPress(Key key) const;
+    bool GetScancodeDown(Scancode scancode) const;
+    bool GetScancodePress(Scancode scancode) const;
+    bool GetMouseButtonDown(MouseButton button) const;
+    bool GetMouseButtonPress(MouseButton button) const;
+    bool GetQualifierDown(Qualifier qualifier) const;
+    bool GetQualifierPress(Qualifier qualifier) const;
     int GetQualifiers() const;
     IntVector2 GetMousePosition() const;
-    const IntVector2& GetMouseMove() const;
+    IntVector2 GetMouseMove() const;
     int GetMouseMoveX() const;
     int GetMouseMoveY() const;
     int GetMouseMoveWheel() const;
+    Vector2 GetInputScale() const;
     unsigned GetNumTouches() const;
     TouchState* GetTouch(unsigned index) const;
     unsigned GetNumJoysticks() const;
     JoystickState* GetJoystick(int id);
     JoystickState* GetJoystickByIndex(unsigned index);
+    JoystickState* GetJoystickByName(const String name);
     bool GetToggleFullscreen() const;
     bool GetScreenKeyboardSupport() const;
     bool IsScreenJoystickVisible(int id) const;
@@ -100,11 +106,12 @@ class Input : public Object
     bool IsMinimized() const;
 
     tolua_readonly tolua_property__get_set int qualifiers;
-    tolua_readonly tolua_property__get_set IntVector2 mousePosition;
-    tolua_readonly tolua_property__get_set IntVector2& mouseMove;
+    tolua_property__get_set IntVector2 mousePosition;
+    tolua_readonly tolua_property__get_set IntVector2 mouseMove;
     tolua_readonly tolua_property__get_set int mouseMoveX;
     tolua_readonly tolua_property__get_set int mouseMoveY;
     tolua_readonly tolua_property__get_set int mouseMoveWheel;
+    tolua_readonly tolua_property__get_set Vector2 inputScale;
     tolua_readonly tolua_property__get_set unsigned numTouches;
     tolua_readonly tolua_property__get_set unsigned numJoysticks;
     tolua_readonly tolua_property__get_set bool toggleFullscreen;
@@ -114,6 +121,7 @@ class Input : public Object
     tolua_property__get_set bool touchEmulation;
     tolua_property__is_set bool mouseVisible;
     tolua_property__is_set bool mouseGrabbed;
+    tolua_readonly tolua_property__is_set bool mouseLocked;
     tolua_readonly tolua_property__has_set bool focus;
     tolua_readonly tolua_property__is_set bool minimized;
 };

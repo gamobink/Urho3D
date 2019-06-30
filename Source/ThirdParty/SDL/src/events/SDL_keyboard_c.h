@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2014 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -18,13 +18,10 @@
      misrepresented as being the original software.
   3. This notice may not be removed or altered from any source distribution.
 */
-
-// Modified by OvermindDL1 for Urho3D
-
 #include "../SDL_internal.h"
 
-#ifndef _SDL_keyboard_c_h
-#define _SDL_keyboard_c_h
+#ifndef SDL_keyboard_c_h_
+#define SDL_keyboard_c_h_
 
 #include "SDL_keycode.h"
 #include "SDL_events.h"
@@ -51,7 +48,7 @@ extern void SDL_SetScancodeName(SDL_Scancode scancode, const char *name);
 extern void SDL_SetKeyboardFocus(SDL_Window * window);
 
 /* Send a keyboard key event */
-extern int SDL_SendKeyboardKey(Uint8 state, Uint32 keycode, SDL_Scancode scancode);
+extern int SDL_SendKeyboardKey(Uint8 state, SDL_Scancode scancode);
 
 /* Send keyboard text input */
 extern int SDL_SendKeyboardText(const char *text);
@@ -65,6 +62,9 @@ extern void SDL_KeyboardQuit(void);
 /* Convert to UTF-8 */
 extern char *SDL_UCS4ToUTF8(Uint32 ch, char *dst);
 
-#endif /* _SDL_keyboard_c_h */
+/* Toggle on or off pieces of the keyboard mod state. */
+extern void SDL_ToggleModState(const SDL_Keymod modstate, const SDL_bool toggle);
+
+#endif /* SDL_keyboard_c_h_ */
 
 /* vi: set ts=4 sw=4 expandtab: */

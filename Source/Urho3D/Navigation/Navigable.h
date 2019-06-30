@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,18 +30,19 @@ namespace Urho3D
 /// Component which tags geometry for inclusion in the navigation mesh. Optionally auto-includes geometry from child nodes.
 class URHO3D_API Navigable : public Component
 {
-    OBJECT(Navigable);
+    URHO3D_OBJECT(Navigable, Component);
 
 public:
     /// Construct.
-    Navigable(Context* context);
+    explicit Navigable(Context* context);
     /// Destruct.
-    virtual ~Navigable();
+    ~Navigable() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Set whether geometry is automatically collected from child nodes. Default true.
     void SetRecursive(bool enable);
+
     /// Return whether geometry is automatically collected from child nodes.
     bool IsRecursive() const { return recursive_; }
 

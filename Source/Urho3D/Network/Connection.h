@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,19 +22,22 @@
 
 #pragma once
 
-#include "../Input/Controls.h"
 #include "../Container/HashSet.h"
 #include "../Core/Object.h"
-#include "../Scene/ReplicationState.h"
 #include "../Core/Timer.h"
+#include "../Input/Controls.h"
 #include "../IO/VectorBuffer.h"
+#include "../Scene/ReplicationState.h"
 
-#include <kNet/kNetFwd.h>
-#include <kNet/SharedPtr.h>
-
-#ifdef SendMessage
-#undef SendMessage
-#endif
+namespace SLNet
+{
+    class SystemAddress;
+    struct AddressOrGUID;
+    struct RakNetGUID;
+    struct Packet;
+    class NatPunchthroughClient;
+    class RakPeerInterface;
+}
 
 namespace Urho3D
 {
@@ -64,7 +67,7 @@ struct PackageDownload
 {
     /// Construct with defaults.
     PackageDownload();
-    
+
     /// Destination file.
     SharedPtr<File> file_;
     /// Already received fragments.
@@ -84,7 +87,7 @@ struct PackageUpload
 {
     /// Construct with defaults.
     PackageUpload();
-    
+
     /// Source file.
     SharedPtr<File> file_;
     /// Current fragment index.
@@ -104,14 +107,14 @@ enum ObserverPositionSendMode
 /// %Connection to a remote network host.
 class URHO3D_API Connection : public Object
 {
-    OBJECT(Connection);
-    
+    URHO3D_OBJECT(Connection, Object);
+
 public:
-    /// Construct with context and kNet message connection pointers.
-    Connection(Context* context, bool isClient, kNet::SharedPtr<kNet::MessageConnection> connection);
+    /// Construct with context, RakNet connection address and Raknet peer pointer.
+    Connection(Context* context, bool isClient, const SLNet::AddressOrGUID& address, SLNet::RakPeerInterface* peer);
     /// Destruct.
-    ~Connection();
-    
+    ~Connection() override;
+
     /// Send a message.
     void SendMessage(int msgID, bool reliable, bool inOrder, const VectorBuffer& msg, unsigned contentID = 0);
     /// Send a message.
@@ -148,33 +151,70 @@ public:
     void ProcessPendingLatestData();
     /// Process a message from the server or client. Called by Network.
     bool ProcessMessage(int msgID, MemoryBuffer& msg);
-    
-    /// Return the kNet message connection.
-    kNet::MessageConnection* GetMessageConnection() const;
+    /// Ban this connections IP address.
+    void Ban();
+    /// Return the RakNet address/guid.
+    const SLNet::AddressOrGUID& GetAddressOrGUID() const { return *address_; }
+    /// Set the the RakNet address/guid.
+    void SetAddressOrGUID(const SLNet::AddressOrGUID& addr);
+
     /// Return client identity.
     VariantMap& GetIdentity() { return identity_; }
+
     /// Return the scene used by this connection.
     Scene* GetScene() const;
+
     /// Return the client controls of this connection.
     const Controls& GetControls() const { return controls_; }
+
+    /// Return the controls timestamp, sent from client to server along each control update.
+    unsigned char GetTimeStamp() const { return timeStamp_; }
+
     /// Return the observer position sent by the client for interest management.
     const Vector3& GetPosition() const { return position_; }
+
     /// Return the observer rotation sent by the client for interest management.
     const Quaternion& GetRotation() const { return rotation_; }
+
     /// Return whether is a client connection.
     bool IsClient() const { return isClient_; }
+
     /// Return whether is fully connected.
     bool IsConnected() const;
+
     /// Return whether connection is pending.
     bool IsConnectPending() const { return connectPending_; }
+
     /// Return whether the scene is loaded and ready to receive server updates.
     bool IsSceneLoaded() const { return sceneLoaded_; }
+
     /// Return whether to log data in/out statistics.
     bool GetLogStatistics() const { return logStatistics_; }
+
     /// Return remote address.
-    String GetAddress() const { return address_; }
+    String GetAddress() const;
+
     /// Return remote port.
     unsigned short GetPort() const { return port_; }
+
+    /// Return the connection's round trip time in milliseconds.
+    float GetRoundTripTime() const;
+
+    /// Return the time since last received data from the remote host in milliseconds.
+    unsigned GetLastHeardTime() const;
+
+    /// Return bytes received per second.
+    float GetBytesInPerSec() const;
+
+    /// Return bytes sent per second.
+    float GetBytesOutPerSec() const;
+
+    /// Return packets received per second.
+    int GetPacketsInPerSec() const;
+
+    /// Return packets sent per second.
+    int GetPacketsOutPerSec() const;
+
     /// Return an address:port string.
     String ToString() const;
     /// Return number of package downloads remaining.
@@ -186,11 +226,16 @@ public:
     /// Trigger client connection to download a package file from the server. Can be used to download additional resource packages when client is already joined in a scene. The package must have been added as a requirement to the scene the client is joined in, or else the eventual download will fail.
     void SendPackageToClient(PackageFile* package);
 
+    /// Set network simulation parameters. Called by Network.
+    void ConfigureNetworkSimulator(int latencyMs, float packetLoss);
+
     /// Current controls.
     Controls controls_;
+    /// Controls timestamp. Incremented after each sent update.
+    unsigned char timeStamp_;
     /// Identity map.
     VariantMap identity_;
-    
+
 private:
     /// Handle scene loaded event.
     void HandleAsyncLoadFinished(StringHash eventType, VariantMap& eventData);
@@ -230,9 +275,7 @@ private:
     void OnPackageDownloadFailed(const String& name);
     /// Handle all packages loaded successfully. Also called directly on MSG_LOADSCENE if there are none.
     void OnPackagesReady();
-    
-    /// kNet message connection.
-    kNet::SharedPtr<kNet::MessageConnection> connection_;
+
     /// Scene.
     WeakPtr<Scene> scene_;
     /// Network replication state of the scene.
@@ -255,8 +298,6 @@ private:
     String sceneFileName_;
     /// Statistics timer.
     Timer statsTimer_;
-    /// Remote endpoint address.
-    String address_;
     /// Remote endpoint port.
     unsigned short port_;
     /// Observer position for interest management.
@@ -273,6 +314,18 @@ private:
     bool sceneLoaded_;
     /// Show statistics flag.
     bool logStatistics_;
+    /// Address of this connection.
+    SLNet::AddressOrGUID* address_;
+    /// Raknet peer object.
+    SLNet::RakPeerInterface* peer_;
+    /// Temporary variable to hold packet count in the next second, x - packets in, y - packets out
+    IntVector2 tempPacketCounter_;
+    /// Packet count in the last second, x - packets in, y - packets out
+    IntVector2 packetCounter_;
+    /// Packet count timer which resets every 1s
+    Timer packetCounterTimer_;
+    /// Last heard timer, resets when new packet is incoming
+    Timer lastHeardTimer_;
 };
 
 }

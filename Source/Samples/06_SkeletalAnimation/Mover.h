@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,24 +29,24 @@ using namespace Urho3D;
 /// Custom logic component for moving the animated model and rotating at area edges.
 class Mover : public LogicComponent
 {
-    OBJECT(Mover);
-    
+    URHO3D_OBJECT(Mover, LogicComponent);
+
 public:
     /// Construct.
-    Mover(Context* context);
-    
+    explicit Mover(Context* context);
+
     /// Set motion parameters: forward movement speed, rotation speed, and movement boundaries.
-    void SetParameters(float moveSpeed, float rotateSpeed, const BoundingBox& bounds);
+    void SetParameters(float moveSpeed, float rotationSpeed, const BoundingBox& bounds);
     /// Handle scene update. Called by LogicComponent base class.
-    virtual void Update(float timeStep);
-    
+    void Update(float timeStep) override;
+
     /// Return forward movement speed.
     float GetMoveSpeed() const { return moveSpeed_; }
     /// Return rotation speed.
     float GetRotationSpeed() const { return rotationSpeed_; }
     /// Return movement boundaries.
     const BoundingBox& GetBounds() const { return bounds_; }
-    
+
 private:
     /// Forward movement speed.
     float moveSpeed_;

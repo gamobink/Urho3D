@@ -1,5 +1,5 @@
 --
--- Copyright (c) 2008-2015 the Urho3D project.
+-- Copyright (c) 2008-2019 the Urho3D project.
 --
 -- Permission is hereby granted, free of charge, to any person obtaining a copy
 -- of this software and associated documentation files (the "Software"), to deal
@@ -57,18 +57,16 @@ function post_output_hook(package)
             end
         until not e
         result = currentString..string.sub(result, nxt)
-        --if k == 0 then print('Pattern not replaced', pattern) end
     end
 
     replace("\t", "  ")
-
     replace([[#ifndef __cplusplus
 #include "stdlib.h"
 #endif
 #include "string.h"
 
 #include "tolua++.h"]], [[//
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -96,6 +94,18 @@ function post_output_hook(package)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
 #endif]])
+    if not _extra_parameters["Urho3D"] then
+        replace([[#include "LuaScript/ToluaUtils.h"]], [[#include <Urho3D/LuaScript/ToluaUtils.h>]])
+    end
+
+    -- Special handling for vector to table conversion which would simplify the implementation of the template functions
+    result = string.gsub(result, "ToluaIs(P?O?D?)Vector([^\"]-)\"c?o?n?s?t? ?P?O?D?Vector<([^*>]-)%*?>\"", "ToluaIs%1Vector%2\"%3\"")
+    result = string.gsub(result, "ToluaPush(P?O?D?)Vector([^\"]-)\"c?o?n?s?t? ?P?O?D?Vector<([^*>]-)%*?>\"", "ToluaPush%1Vector%2\"%3\"")
+    result = string.gsub(result, "@1%(", "(\"\",")      -- is_pointer overload uses const char* as signature
+    result = string.gsub(result, "@2%(", "(0.f,")       -- is_arithmetic overload uses double as signature
+
+    -- Suppress GCC 'pedantic' warnings due to extra semicolon in the emitted code
+    result = string.gsub(result, "TOLUA_API int luaopen_(.+)};", "TOLUA_API int luaopen_%1}")
 
     WRITE(result)
     WRITE([[
@@ -122,15 +132,32 @@ local old_get_push_function = get_push_function
 local old_get_to_function = get_to_function
 local old_get_is_function = get_is_function
 
+function is_pointer(t)
+    return t:find("*>")
+end
+
+function is_arithmetic(t)
+    for _, type in pairs({ "char", "short", "int", "unsigned", "long", "float", "double", "bool" }) do
+        _, pos = t:find(type)
+        if pos ~= nil and t:sub(pos + 1, pos + 1) ~= "*" then return true end
+    end
+    return false
+end
+
+function overload_if_necessary(t)
+    return is_pointer(t) and "@1" or (is_arithmetic(t) and "@2" or "")
+end
+
 function get_push_function(t)
     if not urho3d_is_vector(t) then
         return old_get_push_function(t)
     end
-    
+
+    local T = t:match("<.*>")
     if not urho3d_is_podvector(t) then
-        return "ToluaPushVector" .. t:match("<.*>")
+        return "ToluaPushVector" .. T
     else
-        return "ToluaPushPODVector" .. t:match("<.*>")
+        return "ToluaPushPODVector" .. T .. overload_if_necessary(T)
     end
 end
 
@@ -138,11 +165,12 @@ function get_to_function(t)
     if not urho3d_is_vector(t) then
         return old_get_to_function(t)
     end
-    
+
+    local T = t:match("<.*>")
     if not urho3d_is_podvector(t) then
-        return "ToluaToVector" .. t:match("<.*>")
+        return "ToluaToVector" .. T
     else
-        return "ToluaToPODVector" .. t:match("<.*>")
+        return "ToluaToPODVector" .. T .. overload_if_necessary(T)
     end
 end
 
@@ -150,11 +178,12 @@ function get_is_function(t)
     if not urho3d_is_vector(t) then
         return old_get_is_function(t)
     end
-    
+
+    local T = t:match("<.*>")
     if not urho3d_is_podvector(t) then
-        return "ToluaIsVector" .. t:match("<.*>")
+        return "ToluaIsVector" .. T
     else
-        return "ToluaIsPODVector" .. t:match("<.*>")
+        return "ToluaIsPODVector" .. T .. overload_if_necessary(T)
     end
 end
 
@@ -163,19 +192,37 @@ function get_property_methods_hook(ptype, name)
         local Name = string.upper(string.sub(name, 1, 1))..string.sub(name, 2)
         return "Get"..Name, "Set"..Name
     end
-    
+
     if ptype == "is_set" then
         local Name = string.upper(string.sub(name, 1, 1))..string.sub(name, 2)
         return "Is"..Name, "Set"..Name
     end
-    
+
     if ptype == "has_set" then
         local Name = string.upper(string.sub(name, 1, 1))..string.sub(name, 2)
         return "Has"..Name, "Set"..Name
     end
-    
+
     if ptype == "no_prefix" then
         local Name = string.upper(string.sub(name, 1, 1))..string.sub(name, 2)
         return Name, "Set"..Name
+    end
+end
+
+-- Rudimentary checker to prevent function overloads being declared in a wrong order
+-- The checker assumes function overloads are declared in group one after another within a same pkg file
+-- The checker only checks for single argument function at the moment, but it can be extended to support more when it is necessary
+local overload_checker = {name="", has_number=false}
+function pre_call_hook(self)
+    if table.getn(self.args) ~= 1 then return end
+    if overload_checker.name ~= self.name then
+        overload_checker.name = self.name
+        overload_checker.has_number = false
+    end
+    local t = self.args[1].type
+    if overload_checker.has_number then
+        if t:find("String") or t:find("char*") then warning(self:inclass() .. ":" .. self.name .. " has potential binding problem: number overload becomes dead code if it is declared before string overload") end
+    else
+        overload_checker.has_number = t ~= "bool" and is_arithmetic(t)
     end
 end

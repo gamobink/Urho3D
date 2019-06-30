@@ -19,7 +19,7 @@ class Camera : public Component
     void SetZoom(float zoom);
     void SetLodBias(float bias);
     void SetViewMask(unsigned mask);
-    void SetViewOverrideFlags(unsigned flags);
+    void SetViewOverrideFlags(ViewOverride flags);
     void SetOrthographic(bool enable);
     void SetAutoAspectRatio(bool enable);
     void SetProjectionOffset(const Vector2& offset);
@@ -27,6 +27,7 @@ class Camera : public Component
     void SetReflectionPlane(const Plane& reflectionPlane);
     void SetUseClipping(bool enable);
     void SetClipPlane(const Plane& clipPlane);
+    void SetProjection(const Matrix4& projection);
 
     float GetFarClip() const;
     float GetNearClip() const;
@@ -36,12 +37,13 @@ class Camera : public Component
     float GetZoom() const;
     float GetLodBias() const;
     unsigned GetViewMask() const;
-    unsigned GetViewOverrideFlags() const;
+    ViewOverride GetViewOverrideFlags() const;
     FillMode GetFillMode() const;
     bool IsOrthographic() const;
     bool GetAutoAspectRatio() const;
     const Frustum& GetFrustum() const;
-    const Matrix4& GetProjection() const;
+    Matrix4 GetProjection() const;
+    Matrix4 GetGPUProjection() const;
     const Matrix3x4& GetView() const;
     void GetFrustumSize(Vector3& near, Vector3& far) const;
     float GetHalfViewSize() const;
@@ -71,12 +73,13 @@ class Camera : public Component
     tolua_property__get_set float zoom;
     tolua_property__get_set float lodBias;
     tolua_property__get_set unsigned viewMask;
-    tolua_property__get_set unsigned viewOverrideFlags;
+    tolua_property__get_set ViewOverride viewOverrideFlags;
     tolua_property__get_set FillMode fillMode;
     tolua_property__is_set bool orthographic;
     tolua_property__get_set bool autoAspectRatio;
     tolua_readonly tolua_property__get_set Frustum& frustum;
-    tolua_readonly tolua_property__get_set Matrix4& projection;
+    tolua_readonly tolua_property__get_set Matrix4 projection;
+    tolua_readonly tolua_property__get_set Matrix4 GPUProjection;
     tolua_readonly tolua_property__get_set Matrix3x4& view;
     tolua_readonly tolua_property__get_set float halfViewSize;
     tolua_readonly tolua_property__get_set Frustum viewSpaceFrustum;

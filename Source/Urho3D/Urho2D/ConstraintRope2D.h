@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,13 +30,13 @@ namespace Urho3D
 /// 2D rope constraint component.
 class URHO3D_API ConstraintRope2D : public Constraint2D
 {
-    OBJECT(ConstraintRope2D);
+    URHO3D_OBJECT(ConstraintRope2D, Constraint2D);
 
 public:
     /// Construct.
-    ConstraintRope2D(Context* scontext);
+    explicit ConstraintRope2D(Context* context);
     /// Destruct.
-    virtual ~ConstraintRope2D();
+    ~ConstraintRope2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
@@ -49,14 +49,16 @@ public:
 
     /// Return owner body anchor.
     const Vector2& GetOwnerBodyAnchor() const { return ownerBodyAnchor_; }
+
     /// Return other body anchor.
     const Vector2& GetOtherBodyAnchor() const { return otherBodyAnchor_; }
+
     /// Return max length.
     float GetMaxLength() const { return jointDef_.maxLength; }
 
 private:
     /// Return joint def.
-    virtual b2JointDef* GetJointDef();
+    b2JointDef* GetJointDef() override;
 
     /// Box2D joint def.
     b2RopeJointDef jointDef_;

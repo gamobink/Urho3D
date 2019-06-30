@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "../Math/Color.h"
 #include "../Graphics/Drawable.h"
 #include "../Graphics/Texture.h"
+#include "../Math/Color.h"
 
 namespace Urho3D
 {
@@ -32,20 +32,18 @@ namespace Urho3D
 /// %Component that describes global rendering properties.
 class URHO3D_API Zone : public Drawable
 {
-    OBJECT(Zone);
+    URHO3D_OBJECT(Zone, Drawable);
 
 public:
     /// Construct.
-    Zone(Context* context);
+    explicit Zone(Context* context);
     /// Destruct.
-    virtual ~Zone();
+    ~Zone() override;
     /// Register object factory. Drawable must be registered first.
     static void RegisterObject(Context* context);
 
-    /// Handle attribute write access.
-    virtual void OnSetAttribute(const AttributeInfo& attr, const Variant& src);
     /// Visualize the component as debug geometry.
-    virtual void DrawDebugGeometry(DebugRenderer* debug, bool depthTest);
+    void DrawDebugGeometry(DebugRenderer* debug, bool depthTest) override;
 
     /// Set local-space bounding box. Will be used as an oriented bounding box to test whether objects or the camera are inside.
     void SetBoundingBox(const BoundingBox& box);
@@ -74,30 +72,42 @@ public:
 
     /// Return inverse world transform.
     const Matrix3x4& GetInverseWorldTransform() const;
+
     /// Return zone's own ambient color, disregarding gradient mode.
     const Color& GetAmbientColor() const { return ambientColor_; }
+
     /// Return ambient start color. Not safe to call from worker threads due to possible octree query.
     const Color& GetAmbientStartColor();
     /// Return ambient end color. Not safe to call from worker threads due to possible octree query.
     const Color& GetAmbientEndColor();
+
     /// Return fog color.
     const Color& GetFogColor() const { return fogColor_; }
+
     /// Return fog start distance.
     float GetFogStart() const { return fogStart_; }
+
     /// Return fog end distance.
     float GetFogEnd() const { return fogEnd_; }
+
     /// Return fog height distance relative to the scene node's world position.
     float GetFogHeight() const { return fogHeight_; }
+
     /// Return fog height scale.
     float GetFogHeightScale() const { return fogHeightScale_; }
+
     /// Return zone priority.
     int GetPriority() const { return priority_; }
+
     /// Return whether height fog mode is enabled.
     bool GetHeightFog() const { return heightFog_; }
+
     /// Return whether override mode is enabled.
     bool GetOverride() const { return override_; }
+
     /// Return whether ambient gradient mode is enabled.
     bool GetAmbientGradient() const { return ambientGradient_; }
+
     /// Return zone texture.
     Texture* GetZoneTexture() const { return zoneTexture_; }
 
@@ -110,15 +120,17 @@ public:
 
 protected:
     /// Handle node transform being dirtied.
-    virtual void OnMarkedDirty(Node* node);
+    void OnMarkedDirty(Node* node) override;
     /// Recalculate the world-space bounding box.
-    virtual void OnWorldBoundingBoxUpdate();
+    void OnWorldBoundingBoxUpdate() override;
     /// Handle removal from octree.
-    virtual void OnRemoveFromOctree();
+    void OnRemoveFromOctree() override;
     /// Recalculate the ambient gradient colors from neighbor zones. Not safe to call from worker threads due to octree query.
     void UpdateAmbientGradient();
     /// Clear zone reference from drawables inside the bounding box.
     void ClearDrawablesZone();
+    /// Mark node transform dirty.
+    void MarkNodeDirty() { OnMarkedDirty(node_); }
 
     /// Cached inverse world transform matrix.
     mutable Matrix3x4 inverseWorld_;

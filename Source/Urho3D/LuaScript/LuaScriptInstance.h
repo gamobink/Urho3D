@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@ enum LuaScriptObjectMethod
 {
     LSOM_START = 0,
     LSOM_STOP,
+    LSOM_DELAYEDSTART,
     LSOM_UPDATE,
     LSOM_POSTUPDATE,
     LSOM_FIXEDUPDATE,
@@ -56,45 +57,51 @@ enum LuaScriptObjectMethod
 /// Lua script object component.
 class URHO3D_API LuaScriptInstance : public Component, public LuaScriptEventListener
 {
-    OBJECT(LuaScriptInstance);
+    URHO3D_OBJECT(LuaScriptInstance, Component);
 
 public:
     /// Construct.
-    LuaScriptInstance(Context* context);
+    explicit LuaScriptInstance(Context* context);
     /// Destruct.
-    ~LuaScriptInstance();
+    ~LuaScriptInstance() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Handle attribute write access.
-    virtual void OnSetAttribute(const AttributeInfo& attr, const Variant& src);
+    void OnSetAttribute(const AttributeInfo& attr, const Variant& src) override;
     /// Handle attribute read access.
-    virtual void OnGetAttribute(const AttributeInfo& attr, Variant& dest) const;
+    void OnGetAttribute(const AttributeInfo& attr, Variant& dest) const override;
+
     /// Return attribute descriptions, or null if none defined.
-    virtual const Vector<AttributeInfo>* GetAttributes() const { return &attributeInfos_; }
+    const Vector<AttributeInfo>* GetAttributes() const override { return &attributeInfos_; }
+
     /// Apply attribute changes that can not be applied immediately. Called after scene load or a network update.
-    virtual void ApplyAttributes();
+    void ApplyAttributes() override;
     /// Handle enabled/disabled state change.
-    virtual void OnSetEnabled();
+    void OnSetEnabled() override;
 
     /// Add a scripted event handler by function.
-    virtual void AddEventHandler(const String& eventName, int functionIndex);
+    void AddEventHandler(const String& eventName, int functionIndex) override;
     /// Add a scripted event handler by function name.
-    virtual void AddEventHandler(const String& eventName, const String& functionName);
+    void AddEventHandler(const String& eventName, const String& functionName) override;
     /// Add a scripted event handler by function for a specific sender.
-    virtual void AddEventHandler(Object* sender, const String& eventName, int functionIndex);
+    void AddEventHandler(Object* sender, const String& eventName, int functionIndex) override;
     /// Add a scripted event handler by function name for a specific sender.
-    virtual void AddEventHandler(Object* sender, const String& eventName, const String& functionName);
+    void AddEventHandler(Object* sender, const String& eventName, const String& functionName) override;
     /// Remove a scripted event handler.
-    virtual void RemoveEventHandler(const String& eventName);
+    void RemoveEventHandler(const String& eventName) override;
     /// Remove a scripted event handler for a specific sender.
-    virtual void RemoveEventHandler(Object* sender, const String& eventName);
+    void RemoveEventHandler(Object* sender, const String& eventName) override;
     /// Remove all scripted event handlers for a specific sender.
-    virtual void RemoveEventHandlers(Object* sender);
+    void RemoveEventHandlers(Object* sender) override;
     /// Remove all scripted event handlers.
-    virtual void RemoveAllEventHandlers();
+    void RemoveAllEventHandlers() override;
     /// Remove all scripted event handlers, except those listed.
-    virtual void RemoveEventHandlersExcept(const Vector<String>& exceptionNames);
+    void RemoveEventHandlersExcept(const Vector<String>& exceptionNames) override;
+    /// Return whether has subscribed to an event.
+    bool HasEventHandler(const String& eventName) const override;
+    /// Return whether has subscribed to a specific sender's event.
+    bool HasEventHandler(Object* sender, const String& eventName) const override;
 
     /// Create script object. Return true if successful.
     bool CreateObject(const String& scriptObjectType);
@@ -111,10 +118,13 @@ public:
 
     /// Return script file.
     LuaFile* GetScriptFile() const;
+
     /// Return script object type.
     const String& GetScriptObjectType() const { return scriptObjectType_; }
-    /// Return script object ref.
+
+    /// Return Lua reference to script object.
     int GetScriptObjectRef() const { return scriptObjectRef_; }
+
     /// Get script file serialization attribute by calling a script function.
     PODVector<unsigned char> GetScriptDataAttr() const;
     /// Get script network serialization attribute by calling a script function.
@@ -128,8 +138,10 @@ public:
     ResourceRef GetScriptFileAttr() const;
 
 protected:
+    /// Handle scene being assigned.
+    void OnSceneSet(Scene* scene) override;
     /// Handle node transform being dirtied.
-    virtual void OnMarkedDirty(Node* node);
+    void OnMarkedDirty(Node* node) override;
 
 private:
     /// Find script object attributes.
@@ -144,7 +156,7 @@ private:
     void HandleUpdate(StringHash eventType, VariantMap& eventData);
     /// Handle the logic post update event.
     void HandlePostUpdate(StringHash eventType, VariantMap& eventData);
-#ifdef URHO3D_PHYSICS
+#if defined(URHO3D_PHYSICS) || defined(URHO3D_URHO2D)
     /// Handle the physics update event.
     void HandleFixedUpdate(StringHash eventType, VariantMap& eventData);
     /// Handle the physics post update event.
@@ -153,10 +165,10 @@ private:
     /// Release the script object.
     void ReleaseObject();
 
-    // Lua Script subsystem.
-    LuaScript* luaScript_;
+    /// Lua Script subsystem.
+    LuaScript* luaScript_{};
     /// Lua state.
-    lua_State* luaState_;
+    lua_State* luaState_{};
     /// Event invoker.
     SharedPtr<LuaScriptEventInvoker> eventInvoker_;
     /// Script file.
@@ -165,10 +177,10 @@ private:
     String scriptObjectType_;
     /// Attributes, including script object variables.
     Vector<AttributeInfo> attributeInfos_;
-    /// Script object ref.
-    int scriptObjectRef_;
+    /// Lua reference to script object.
+    int scriptObjectRef_{};
     /// Script object method.
-    LuaFunction* scriptObjectMethods_[MAX_LUA_SCRIPT_OBJECT_METHODS];
+    LuaFunction* scriptObjectMethods_[MAX_LUA_SCRIPT_OBJECT_METHODS]{};
 };
 
 }

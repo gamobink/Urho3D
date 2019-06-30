@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,18 +34,18 @@ class Texture2D;
 /// %Image %UI element with optional border.
 class URHO3D_API BorderImage : public UIElement
 {
-    OBJECT(BorderImage);
+    URHO3D_OBJECT(BorderImage, UIElement);
 
 public:
     /// Construct.
-    BorderImage(Context* context);
+    explicit BorderImage(Context* context);
     /// Destruct.
-    virtual ~BorderImage();
+    ~BorderImage() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Return UI rendering batches.
-    virtual void GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor);
+    void GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor) override;
 
     /// Set texture.
     void SetTexture(Texture* texture);
@@ -65,30 +65,46 @@ public:
     void SetBlendMode(BlendMode mode);
     /// Set tiled mode.
     void SetTiled(bool enable);
+    /// Set material for custom rendering.
+    void SetMaterial(Material* material);
 
     /// Return texture.
     Texture* GetTexture() const { return texture_; }
+
     /// Return image rectangle.
     const IntRect& GetImageRect() const { return imageRect_; }
+
     /// Return border screen dimensions.
     const IntRect& GetBorder() const { return border_; }
+
     /// Return border image dimensions. Zero rect uses border screen dimensions.
     const IntRect& GetImageBorder() const { return imageBorder_; }
+
     /// Return offset to image rectangle used on hover.
     const IntVector2& GetHoverOffset() const { return hoverOffset_; }
+
     /// Return blend mode.
     BlendMode GetBlendMode() const { return blendMode_; }
+
     /// Return whether is tiled.
     bool IsTiled() const { return tiled_; }
+
+    /// Get material used for custom rendering.
+    Material* GetMaterial() const;
 
     /// Set texture attribute.
     void SetTextureAttr(const ResourceRef& value);
     /// Return texture attribute.
     ResourceRef GetTextureAttr() const;
 
+    /// Set material attribute.
+    void SetMaterialAttr(const ResourceRef& value);
+    /// Get material attribute.
+    ResourceRef GetMaterialAttr() const;
 protected:
     /// Return UI rendering batches with offset to image rectangle.
-    void GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor, const IntVector2& offset);
+    void GetBatches
+        (PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor, const IntVector2& offset);
 
     /// Texture.
     SharedPtr<Texture> texture_;
@@ -104,6 +120,8 @@ protected:
     BlendMode blendMode_;
     /// Tiled flag.
     bool tiled_;
+    /// Material used for custom rendering.
+    SharedPtr<Material> material_;
 };
 
 }

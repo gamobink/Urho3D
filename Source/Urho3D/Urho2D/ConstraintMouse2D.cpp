@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,10 @@
 // THE SOFTWARE.
 //
 
-#include "../Urho2D/ConstraintMouse2D.h"
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
+#include "../Urho2D/ConstraintMouse2D.h"
 #include "../Urho2D/PhysicsUtils2D.h"
 #include "../Urho2D/RigidBody2D.h"
 
@@ -30,27 +32,26 @@
 namespace Urho3D
 {
 
+extern const char* URHO2D_CATEGORY;
+
 ConstraintMouse2D::ConstraintMouse2D(Context* context) :
     Constraint2D(context),
-    target_(Vector2::ZERO),
-    targetSetted_(false)
+    target_(Vector2::ZERO)
 {
 }
 
-ConstraintMouse2D::~ConstraintMouse2D()
-{
-}
+ConstraintMouse2D::~ConstraintMouse2D() = default;
 
 void ConstraintMouse2D::RegisterObject(Context* context)
 {
-    context->RegisterFactory<ConstraintMouse2D>();
+    context->RegisterFactory<ConstraintMouse2D>(URHO2D_CATEGORY);
 
-    ACCESSOR_ATTRIBUTE("Is Enabled", IsEnabled, SetEnabled, bool, true, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Target", GetTarget, SetTarget, Vector2, Vector2::ZERO, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Max Force", GetMaxForce, SetMaxForce, float, 0.0f, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Frequency Hz", GetFrequencyHz, SetFrequencyHz, float, 5.0f, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Damping Ratio", GetDampingRatio, SetDampingRatio, float, 0.7f, AM_DEFAULT);
-    COPY_BASE_ATTRIBUTES(Constraint2D);
+    URHO3D_ACCESSOR_ATTRIBUTE("Is Enabled", IsEnabled, SetEnabled, bool, true, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Target", GetTarget, SetTarget, Vector2, Vector2::ZERO, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Max Force", GetMaxForce, SetMaxForce, float, 0.0f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Frequency Hz", GetFrequencyHz, SetFrequencyHz, float, 5.0f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Damping Ratio", GetDampingRatio, SetDampingRatio, float, 0.7f, AM_DEFAULT);
+    URHO3D_COPY_BASE_ATTRIBUTES(Constraint2D);
 }
 
 void ConstraintMouse2D::SetTarget(const Vector2& target)
@@ -59,18 +60,12 @@ void ConstraintMouse2D::SetTarget(const Vector2& target)
         return;
 
     target_ = target;
-    if (joint_ && targetSetted_)
-    {
-        b2MouseJoint* mouseJoint = (b2MouseJoint*)joint_;
-        mouseJoint->SetTarget(ToB2Vec2(target_));
 
-        MarkNetworkUpdate();
-        return;
-    }
+    if (joint_)
+        static_cast<b2MouseJoint*>(joint_)->SetTarget(ToB2Vec2(target));
+    else
+        RecreateJoint();
 
-    targetSetted_ = true;
-
-    RecreateJoint();
     MarkNetworkUpdate();
 }
 
@@ -81,7 +76,11 @@ void ConstraintMouse2D::SetMaxForce(float maxForce)
 
     jointDef_.maxForce = maxForce;
 
-    RecreateJoint();
+    if (joint_)
+        static_cast<b2MouseJoint*>(joint_)->SetMaxForce(maxForce);
+    else
+        RecreateJoint();
+
     MarkNetworkUpdate();
 }
 
@@ -92,7 +91,11 @@ void ConstraintMouse2D::SetFrequencyHz(float frequencyHz)
 
     jointDef_.frequencyHz = frequencyHz;
 
-    RecreateJoint();
+    if (joint_)
+        static_cast<b2MouseJoint*>(joint_)->SetFrequency(frequencyHz);
+    else
+        RecreateJoint();
+
     MarkNetworkUpdate();
 }
 
@@ -103,19 +106,23 @@ void ConstraintMouse2D::SetDampingRatio(float dampingRatio)
 
     jointDef_.dampingRatio = dampingRatio;
 
-    RecreateJoint();
+    if (joint_)
+        static_cast<b2MouseJoint*>(joint_)->SetDampingRatio(dampingRatio);
+    else
+        RecreateJoint();
+
     MarkNetworkUpdate();
 }
 
 b2JointDef* ConstraintMouse2D::GetJointDef()
 {
     if (!ownerBody_ || !otherBody_)
-        return 0;
+        return nullptr;
 
     b2Body* bodyA = otherBody_->GetBody();
     b2Body* bodyB = ownerBody_->GetBody();
     if (!bodyA || !bodyB)
-        return 0;
+        return nullptr;
 
     jointDef_.bodyA = bodyA;
     jointDef_.bodyB = bodyB;

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,14 +20,16 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
+#include "../Core/Profiler.h"
+#include "../Graphics/Graphics.h"
 #include "../IO/Deserializer.h"
 #include "../IO/FileSystem.h"
 #include "../UI/Font.h"
 #include "../UI/FontFaceBitmap.h"
 #include "../UI/FontFaceFreeType.h"
-#include "../Graphics/Graphics.h"
-#include "../Core/Profiler.h"
 #include "../Resource/ResourceCache.h"
 #include "../Resource/XMLElement.h"
 #include "../Resource/XMLFile.h"
@@ -37,8 +39,17 @@
 namespace Urho3D
 {
 
-static const int MIN_POINT_SIZE = 1;
-static const int MAX_POINT_SIZE = 96;
+namespace
+{
+    /// Convert float to 26.6 fixed-point (as used internally by FreeType)
+    inline int FloatToFixed(float value)
+    {
+        return (int)(value * 64);
+    }
+}
+
+static const float MIN_POINT_SIZE = 1;
+static const float MAX_POINT_SIZE = 96;
 
 Font::Font(Context* context) :
     Resource(context),
@@ -65,7 +76,7 @@ void Font::RegisterObject(Context* context)
 bool Font::BeginLoad(Deserializer& source)
 {
     // In headless mode, do not actually load, just return success
-    Graphics* graphics = GetSubsystem<Graphics>();
+    auto* graphics = GetSubsystem<Graphics>();
     if (!graphics)
         return true;
 
@@ -106,7 +117,7 @@ bool Font::SaveXML(Serializer& dest, int pointSize, bool usedGlyphs, const Strin
     if (!fontFace)
         return false;
 
-    PROFILE(FontSaveXML);
+    URHO3D_PROFILE(FontSaveXML);
 
     SharedPtr<FontFaceBitmap> packedFontFace(new FontFaceBitmap(this));
     if (!packedFontFace->Load(fontFace, usedGlyphs))
@@ -125,12 +136,12 @@ void Font::SetScaledGlyphOffset(const Vector2& offset)
     scaledOffset_ = offset;
 }
 
-FontFace* Font::GetFace(int pointSize)
+FontFace* Font::GetFace(float pointSize)
 {
     // In headless mode, always return null
-    Graphics* graphics = GetSubsystem<Graphics>();
+    auto* graphics = GetSubsystem<Graphics>();
     if (!graphics)
-        return 0;
+        return nullptr;
 
     // For bitmap font type, always return the same font face provided by the font's bitmap file regardless of the actual requested point size
     if (fontType_ == FONT_BITMAP)
@@ -138,7 +149,9 @@ FontFace* Font::GetFace(int pointSize)
     else
         pointSize = Clamp(pointSize, MIN_POINT_SIZE, MAX_POINT_SIZE);
 
-    HashMap<int, SharedPtr<FontFace> >::Iterator i = faces_.Find(pointSize);
+    // For outline fonts, we return the nearest size in 1/64th increments, as that's what FreeType supports.
+    int key = FloatToFixed(pointSize);
+    HashMap<int, SharedPtr<FontFace> >::Iterator i = faces_.Find(key);
     if (i != faces_.End())
     {
         if (!i->second_->IsDataLost())
@@ -150,7 +163,7 @@ FontFace* Font::GetFace(int pointSize)
         }
     }
 
-    PROFILE(GetFontFace);
+    URHO3D_PROFILE(GetFontFace);
 
     switch (fontType_)
     {
@@ -161,14 +174,14 @@ FontFace* Font::GetFace(int pointSize)
         return GetFaceBitmap(pointSize);
 
     default:
-        return 0;
+        return nullptr;
     }
 }
 
-IntVector2 Font::GetTotalGlyphOffset(int pointSize) const
+IntVector2 Font::GetTotalGlyphOffset(float pointSize) const
 {
-    Vector2 multipliedOffset = (float)pointSize * scaledOffset_;
-    return absoluteOffset_ + IntVector2((int)multipliedOffset.x_, (int)multipliedOffset.y_);
+    Vector2 multipliedOffset = pointSize * scaledOffset_;
+    return absoluteOffset_ + IntVector2(RoundToInt(multipliedOffset.x_), RoundToInt(multipliedOffset.y_));
 }
 
 void Font::ReleaseFaces()
@@ -178,28 +191,28 @@ void Font::ReleaseFaces()
 
 void Font::LoadParameters()
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
     String xmlName = ReplaceExtension(GetName(), ".xml");
     SharedPtr<XMLFile> xml = cache->GetTempResource<XMLFile>(xmlName, false);
     if (!xml)
         return;
-    
+
     XMLElement rootElem = xml->GetRoot();
-    
+
     XMLElement absoluteElem = rootElem.GetChild("absoluteoffset");
     if (!absoluteElem)
         absoluteElem = rootElem.GetChild("absolute");
-    
+
     if (absoluteElem)
     {
         absoluteOffset_.x_ = absoluteElem.GetInt("x");
         absoluteOffset_.y_ = absoluteElem.GetInt("y");
     }
-    
+
     XMLElement scaledElem = rootElem.GetChild("scaledoffset");
     if (!scaledElem)
         scaledElem = rootElem.GetChild("scaled");
-    
+
     if (scaledElem)
     {
         scaledOffset_.x_ = scaledElem.GetFloat("x");
@@ -207,23 +220,25 @@ void Font::LoadParameters()
     }
 }
 
-FontFace* Font::GetFaceFreeType(int pointSize)
+FontFace* Font::GetFaceFreeType(float pointSize)
 {
     SharedPtr<FontFace> newFace(new FontFaceFreeType(this));
     if (!newFace->Load(&fontData_[0], fontDataSize_, pointSize))
-        return 0;
+        return nullptr;
 
-    faces_[pointSize] = newFace;
+    int key = FloatToFixed(pointSize);
+    faces_[key] = newFace;
     return newFace;
 }
 
-FontFace* Font::GetFaceBitmap(int pointSize)
+FontFace* Font::GetFaceBitmap(float pointSize)
 {
     SharedPtr<FontFace> newFace(new FontFaceBitmap(this));
     if (!newFace->Load(&fontData_[0], fontDataSize_, pointSize))
-        return 0;
+        return nullptr;
 
-    faces_[pointSize] = newFace;
+    int key = FloatToFixed(pointSize);
+    faces_[key] = newFace;
     return newFace;
 }
 

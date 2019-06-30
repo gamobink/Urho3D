@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,13 +30,13 @@ namespace Urho3D
 /// 2D friction constraint component.
 class URHO3D_API ConstraintFriction2D : public Constraint2D
 {
-    OBJECT(ConstraintFriction2D);
+    URHO3D_OBJECT(ConstraintFriction2D, Constraint2D);
 
 public:
     /// Construct.
-    ConstraintFriction2D(Context* scontext);
+    explicit ConstraintFriction2D(Context* context);
     /// Destruct.
-    virtual ~ConstraintFriction2D();
+    ~ConstraintFriction2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
@@ -49,14 +49,16 @@ public:
 
     /// Return anchor.
     const Vector2& GetAnchor() const { return anchor_; }
+
     /// Set max force.
     float GetMaxForce() const { return jointDef_.maxForce; }
+
     /// Set max torque.
     float GetMaxTorque() const { return jointDef_.maxTorque; }
 
 private:
     /// Return joint def.
-    virtual b2JointDef* GetJointDef();
+    b2JointDef* GetJointDef() override;
 
     /// Box2D joint def.
     b2FrictionJointDef jointDef_;

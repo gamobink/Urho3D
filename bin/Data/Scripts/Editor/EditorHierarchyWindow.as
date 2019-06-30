@@ -24,6 +24,7 @@ Color componentTextColor(0.7f, 1.0f, 0.7f);
 
 Window@ hierarchyWindow;
 ListView@ hierarchyList;
+bool showID = true;
 
 // UIElement does not have unique ID, so use a running number to generate a new ID each time an item is inserted into hierarchy list
 const uint UI_ELEMENT_BASE_ID = 1;
@@ -59,7 +60,7 @@ void CreateHierarchyWindow()
     hierarchyWindow = LoadEditorUI("UI/EditorHierarchyWindow.xml");
     hierarchyList = hierarchyWindow.GetChild("HierarchyList");
     ui.root.AddChild(hierarchyWindow);
-    int height = Min(ui.root.height - 60, 460);
+    int height = Min(ui.root.height - 60, 500);
     hierarchyWindow.SetSize(300, height);
     hierarchyWindow.SetPosition(35, 100);
     hierarchyWindow.opacity = uiMaxOpacity;
@@ -77,30 +78,39 @@ void CreateHierarchyWindow()
     SubscribeToEvent(hierarchyWindow.GetChild("CloseButton", true), "Released", "HideHierarchyWindow");
     SubscribeToEvent(hierarchyWindow.GetChild("ExpandButton", true), "Released", "ExpandCollapseHierarchy");
     SubscribeToEvent(hierarchyWindow.GetChild("CollapseButton", true), "Released", "ExpandCollapseHierarchy");
+    SubscribeToEvent(hierarchyWindow.GetChild("ResetButton", true), "Released", "CollapseHierarchy");
+    SubscribeToEvent(hierarchyWindow.GetChild("ShowID", true), "Toggled", "HandleShowID");
     SubscribeToEvent(hierarchyList, "SelectionChanged", "HandleHierarchyListSelectionChange");
     SubscribeToEvent(hierarchyList, "ItemDoubleClicked", "HandleHierarchyListDoubleClick");
     SubscribeToEvent(hierarchyList, "ItemClicked", "HandleHierarchyItemClick");
     SubscribeToEvent("DragDropTest", "HandleDragDropTest");
     SubscribeToEvent("DragDropFinish", "HandleDragDropFinish");
-    SubscribeToEvent(editorScene, "NodeAdded", "HandleNodeAdded");
-    SubscribeToEvent(editorScene, "NodeRemoved", "HandleNodeRemoved");
     SubscribeToEvent(editorScene, "ComponentAdded", "HandleComponentAdded");
     SubscribeToEvent(editorScene, "ComponentRemoved", "HandleComponentRemoved");
-    SubscribeToEvent(editorScene, "NodeNameChanged", "HandleNodeNameChanged");
     SubscribeToEvent(editorScene, "NodeEnabledChanged", "HandleNodeEnabledChanged");
     SubscribeToEvent(editorScene, "ComponentEnabledChanged", "HandleComponentEnabledChanged");
     SubscribeToEvent("TemporaryChanged", "HandleTemporaryChanged");
 }
 
-bool ShowHierarchyWindow()
+bool ToggleHierarchyWindow()
+{
+    if (hierarchyWindow.visible == false)
+        ShowHierarchyWindow();
+    else
+        HideHierarchyWindow();
+    return true;
+}
+
+void ShowHierarchyWindow()
 {
     hierarchyWindow.visible = true;
     hierarchyWindow.BringToFront();
-    return true;
 }
 
 void HideHierarchyWindow()
 {
+    if(viewportMode == VIEWPORT_COMPACT)
+        return;
     hierarchyWindow.visible = false;
 }
 
@@ -295,8 +305,7 @@ void AddComponentItem(uint compItemIndex, Component@ component, UIElement@ paren
     text.vars[COMPONENT_ID_VAR] = component.id;
     text.text = GetComponentTitle(component);
     text.color = componentTextColor;
-    // Components currently act only as drag targets
-    text.dragDropMode = DD_TARGET;
+    text.dragDropMode = DD_SOURCE_AND_TARGET;
 
     IconizeUIElement(text, component.typeName);
     SetIconEnabledColor(text, component.enabledEffective);
@@ -322,7 +331,7 @@ void SetID(Text@ text, Serializable@ serializable, int itemType = ITEM_NONE)
 
     text.vars[TYPE_VAR] = itemType;
     text.vars[ID_VARS[itemType]] = GetID(serializable, itemType);
-    
+
     // Set node ID as drag and drop content for node ID editing
     if (itemType == ITEM_NODE)
         text.vars[DRAGDROPCONTENT_VAR] = String(text.vars[NODE_ID_VAR].GetUInt());
@@ -465,13 +474,16 @@ String GetNodeTitle(Node@ node)
     else
         ret = node.name;
 
-    if (node.id >= FIRST_LOCAL_ID)
-        ret += " (Local " + String(node.id) + ")";
-    else
-        ret += " (" + String(node.id) + ")";
+    if (showID)
+    {
+        if (node.replicated)
+            ret += " (" + String(node.id) + ")";
+        else
+            ret += " (Local " + String(node.id) + ")";
 
-    if (node.temporary)
-        ret += " (Temp)";
+        if (node.temporary)
+            ret += " (Temp)";
+    }
 
     return ret;
 }
@@ -480,12 +492,14 @@ String GetComponentTitle(Component@ component)
 {
     String ret = component.typeName;
 
-    if (component.id >= FIRST_LOCAL_ID)
-        ret += " (Local)";
+    if (showID)
+    {
+        if (!component.replicated)
+            ret += " (Local)";
 
-    if (component.temporary)
-        ret += " (Temp)";
-
+        if (component.temporary)
+            ret += " (Temp)";
+    }
     return ret;
 }
 
@@ -497,6 +511,7 @@ void SelectNode(Node@ node, bool multiselect)
         return;
     }
 
+    lastSelectedNode = node;
     uint index = GetListIndex(node);
     uint numItems = hierarchyList.numItems;
 
@@ -523,6 +538,23 @@ void SelectNode(Node@ node, bool multiselect)
     }
     else if (!multiselect)
         hierarchyList.ClearSelection();
+}
+
+void DeselectNode(Node@ node)
+{
+    if (node is null)
+    {
+        hierarchyList.ClearSelection();
+        return;
+    }
+
+    uint index = GetListIndex(node);
+    uint numItems = hierarchyList.numItems;
+
+    if (index < numItems)
+    {
+        hierarchyList.ToggleSelection(index);
+    }
 }
 
 void SelectComponent(Component@ component, bool multiselect)
@@ -598,6 +630,57 @@ void SelectUIElement(UIElement@ element, bool multiselect)
         hierarchyList.ClearSelection();
 }
 
+// Find the first selected StaticModel/AtimatedModel component or node with it
+Model@ FindFirstSelectedModel()
+{
+    for (uint i = 0; i < selectedComponents.length; ++i)
+    {
+        // Get SM, but also works well for AnimatedModel
+        StaticModel@ sm = cast<StaticModel>(selectedComponents[i]);
+        if (sm !is null && sm.model !is null)
+            return sm.model;
+    }
+
+    for (uint i = 0; i < selectedNodes.length; ++i)
+    {
+        for (uint j = 0; j < selectedNodes[i].numComponents; ++j)
+        {
+            StaticModel@ sm = cast<StaticModel>(selectedNodes[i].components[j]);
+            if (sm !is null && sm.model !is null)
+                return sm.model;
+        }
+    }
+
+    return null;
+}
+
+void UpdateModelInfo(Model@ model)
+{
+    if (model is null)
+    {
+        modelInfoText.text = "";
+        return;
+    }
+
+    String infoStr = "Model: " + model.name;
+
+    infoStr += "\n  Morphs: " + model.numMorphs;
+
+    for (uint g = 0; g < model.numGeometries; ++g)
+    {
+        uint numLods = model.numGeometryLodLevels[g];
+        infoStr += "\n  Geometry " + g + "\n    Lods: " + numLods;
+        for (uint l = 0; l < numLods; l++)
+        {
+            Geometry@ geom = model.GetGeometry(g, l);
+            infoStr += "\n      Vertex Count: " + geom.vertexCount;
+            infoStr += "\n      Index Count: " + geom.indexCount;
+        }
+    }
+
+    modelInfoText.text = infoStr;
+}
+
 void HandleHierarchyListSelectionChange()
 {
     if (inSelectionModify)
@@ -658,6 +741,8 @@ void HandleHierarchyListSelectionChange()
         }
         editNode = commonNode;
     }
+
+    UpdateModelInfo(FindFirstSelectedModel());
 
     // Now check if the component(s) can be edited. If many selected, must have same type or have same edit node
     if (!selectedComponents.empty)
@@ -742,7 +827,24 @@ void HandleHierarchyListDoubleClick(StringHash eventType, VariantMap& eventData)
     if (type == ITEM_NODE)
     {
         Node@ node = editorScene.GetNode(item.vars[NODE_ID_VAR].GetUInt());
-        LocateNode(node);
+        Array<Node@> nodes;
+        nodes.Push(node);
+        LocateNodes(nodes);
+    }
+    else if (type == ITEM_COMPONENT)
+    {
+        Component@ component = editorScene.GetComponent(item.vars[COMPONENT_ID_VAR].GetUInt());
+        Array<Component@> components;
+        components.Push(component);
+        LocateComponents(components);
+    }
+
+    bool isExpanded = hierarchyList.IsExpanded(hierarchyList.selection);
+
+    if (!isExpanded && eventData["Button"].GetInt() == MOUSEB_LEFT)
+    {
+        isExpanded = !isExpanded;
+        hierarchyList.Expand(hierarchyList.selection, isExpanded, false);
     }
 }
 
@@ -778,7 +880,7 @@ void HandleHierarchyItemClick(StringHash eventType, VariantMap& eventData)
         actions.Push(CreateContextMenuItem("Copy", "HandleHierarchyContextCopy"));
         actions.Push(CreateContextMenuItem("Cut", "HandleHierarchyContextCut"));
         actions.Push(CreateContextMenuItem("Delete", "HandleHierarchyContextDelete"));
-        actions.Push(CreateContextMenuItem("Paste", "HandleHierarchyContextPaste")); 
+        actions.Push(CreateContextMenuItem("Paste", "HandleHierarchyContextPaste"));
         actions.Push(CreateContextMenuItem("Enable/disable", "HandleHierarchyContextEnableDisable"));
 
         /* actions.Push(CreateBrowserFileActionMenu("Edit", "HandleBrowserEditResource", file)); */
@@ -791,7 +893,7 @@ void HandleHierarchyItemClick(StringHash eventType, VariantMap& eventData)
         actions.Push(CreateContextMenuItem("Copy", "HandleHierarchyContextCopy"));
         actions.Push(CreateContextMenuItem("Cut", "HandleHierarchyContextCut"));
         actions.Push(CreateContextMenuItem("Delete", "HandleHierarchyContextDelete"));
-        actions.Push(CreateContextMenuItem("Paste", "HandleHierarchyContextPaste")); 
+        actions.Push(CreateContextMenuItem("Paste", "HandleHierarchyContextPaste"));
         actions.Push(CreateContextMenuItem("Reset to default", "HandleHierarchyContextResetToDefault"));
         actions.Push(CreateContextMenuItem("Reset position", "HandleHierarchyContextResetPosition"));
         actions.Push(CreateContextMenuItem("Reset rotation", "HandleHierarchyContextResetRotation"));
@@ -828,7 +930,7 @@ void HandleDragDropFinish(StringHash eventType, VariantMap& eventData)
     if (!accept)
         return;
 
-    // resource browser
+    // Resource browser
     if (source !is null && source.GetVar(TEXT_VAR_RESOURCE_TYPE).GetInt() > 0)
     {
         int type = source.GetVar(TEXT_VAR_RESOURCE_TYPE).GetInt();
@@ -934,18 +1036,23 @@ void HandleDragDropFinish(StringHash eventType, VariantMap& eventData)
     if (itemType == ITEM_NODE)
     {
         Node@ targetNode = editorScene.GetNode(target.vars[NODE_ID_VAR].GetUInt());
-
-        // If target is null, parent to scene
-        if (targetNode is null)
-            targetNode = editorScene;
-
         Array<Node@> sourceNodes = GetMultipleSourceNodes(source);
+
         if (sourceNodes.length > 0)
         {
-            if (sourceNodes.length > 1)
-                SceneChangeParent(sourceNodes[0], sourceNodes, targetNode);
+            if (input.qualifierDown[QUAL_CTRL] && sourceNodes.length == 1)
+                SceneReorder(sourceNodes[0], targetNode);
             else
-                SceneChangeParent(sourceNodes[0], targetNode);
+            {
+                // If target is null, parent to scene
+                if (targetNode is null)
+                    targetNode = editorScene;
+
+                if (sourceNodes.length > 1)
+                    SceneChangeParent(sourceNodes[0], sourceNodes, targetNode);
+                else
+                    SceneChangeParent(sourceNodes[0], targetNode);
+            }
 
             // Focus the node at its new position in the list which in turn should trigger a refresh in attribute inspector
             FocusNode(sourceNodes[0]);
@@ -960,68 +1067,88 @@ void HandleDragDropFinish(StringHash eventType, VariantMap& eventData)
         if (targetElement is null)
             return;
 
-        // Perform the reparenting
-        if (!UIElementChangeParent(sourceElement, targetElement))
-            return;
+        if (input.qualifierDown[QUAL_CTRL])
+        {
+            if (!UIElementReorder(sourceElement, targetElement))
+                return;
+        }
+        else
+        {
+            if (!UIElementChangeParent(sourceElement, targetElement))
+                return;
+        }
 
         // Focus the element at its new position in the list which in turn should trigger a refresh in attribute inspector
         FocusUIElement(sourceElement);
     }
     else if (itemType == ITEM_COMPONENT)
     {
-        Array<Node@> sourceNodes = GetMultipleSourceNodes(source);
         Component@ targetComponent = editorScene.GetComponent(target.vars[COMPONENT_ID_VAR].GetUInt());
-        if (targetComponent !is null && sourceNodes.length > 0)
+        Array<Node@> sourceNodes = GetMultipleSourceNodes(source);
+
+        if (input.qualifierDown[QUAL_CTRL] && sourceNodes.length == 1)
         {
-            // Drag node to StaticModelGroup to make it an instance
-            StaticModelGroup@ smg = cast<StaticModelGroup>(targetComponent);
-            if (smg !is null)
+            // Reorder components within node
+            Component@ sourceComponent = editorScene.GetComponent(source.vars[COMPONENT_ID_VAR].GetUInt());
+            SceneReorder(sourceComponent, targetComponent);
+        }
+        else
+        {
+            if (targetComponent !is null && sourceNodes.length > 0)
             {
-                // Save undo action
-                EditAttributeAction action;
-                uint attrIndex = GetAttributeIndex(smg, "Instance Nodes");
-                Variant oldIDs = smg.attributes[attrIndex];
+                // Drag node to StaticModelGroup to make it an instance
+                StaticModelGroup@ smg = cast<StaticModelGroup>(targetComponent);
+                if (smg !is null)
+                {
+                    // Save undo action
+                    EditAttributeAction action;
+                    uint attrIndex = GetAttributeIndex(smg, "Instance Nodes");
+                    Variant oldIDs = smg.attributes[attrIndex];
 
-                for (uint i = 0; i < sourceNodes.length; ++i)
-                    smg.AddInstanceNode(sourceNodes[i]);
+                    for (uint i = 0; i < sourceNodes.length; ++i)
+                        smg.AddInstanceNode(sourceNodes[i]);
 
-                action.Define(smg, attrIndex, oldIDs);
-                SaveEditAction(action);
-                SetSceneModified();
-            }
+                    action.Define(smg, attrIndex, oldIDs);
+                    SaveEditAction(action);
+                    SetSceneModified();
+                    UpdateAttributeInspector(false);
+                }
 
-            // Drag node to SplinePath to make it a control point
-            SplinePath@ spline = cast<SplinePath>(targetComponent);
-            if (spline !is null)
-            {
-                // Save undo action
-                EditAttributeAction action;
-                uint attrIndex = GetAttributeIndex(spline, "Control Points");
-                Variant oldIDs = spline.attributes[attrIndex];
+                // Drag node to SplinePath to make it a control point
+                SplinePath@ spline = cast<SplinePath>(targetComponent);
+                if (spline !is null)
+                {
+                    // Save undo action
+                    EditAttributeAction action;
+                    uint attrIndex = GetAttributeIndex(spline, "Control Points");
+                    Variant oldIDs = spline.attributes[attrIndex];
 
-                for (uint i = 0; i < sourceNodes.length; ++i)
-                    spline.AddControlPoint(sourceNodes[i]);
+                    for (uint i = 0; i < sourceNodes.length; ++i)
+                        spline.AddControlPoint(sourceNodes[i]);
 
-                action.Define(spline, attrIndex, oldIDs);
-                SaveEditAction(action);
-                SetSceneModified();
-            }
+                    action.Define(spline, attrIndex, oldIDs);
+                    SaveEditAction(action);
+                    SetSceneModified();
+                    UpdateAttributeInspector(false);
+                }
 
-            // Drag a node to Constraint to make it the remote end of the constraint
-            Constraint@ constraint = cast<Constraint>(targetComponent);
-            RigidBody@ rigidBody = sourceNodes[0].GetComponent("RigidBody");
-            if (constraint !is null && rigidBody !is null)
-            {
-                // Save undo action
-                EditAttributeAction action;
-                uint attrIndex = GetAttributeIndex(constraint, "Other Body NodeID");
-                Variant oldID = constraint.attributes[attrIndex];
+                // Drag a node to Constraint to make it the remote end of the constraint
+                Constraint@ constraint = cast<Constraint>(targetComponent);
+                RigidBody@ rigidBody = sourceNodes[0].GetComponent("RigidBody");
+                if (constraint !is null && rigidBody !is null)
+                {
+                    // Save undo action
+                    EditAttributeAction action;
+                    uint attrIndex = GetAttributeIndex(constraint, "Other Body NodeID");
+                    Variant oldID = constraint.attributes[attrIndex];
 
-                constraint.otherBody = rigidBody;
+                    constraint.otherBody = rigidBody;
 
-                action.Define(constraint, attrIndex, oldID);
-                SaveEditAction(action);
-                SetSceneModified();
+                    action.Define(constraint, attrIndex, oldID);
+                    SaveEditAction(action);
+                    SetSceneModified();
+                    UpdateAttributeInspector(false);
+                }
             }
         }
     }
@@ -1030,7 +1157,7 @@ void HandleDragDropFinish(StringHash eventType, VariantMap& eventData)
 Array<Node@> GetMultipleSourceNodes(UIElement@ source)
 {
     Array<Node@> nodeList;
-    
+
     Node@ node = editorScene.GetNode(source.vars[NODE_ID_VAR].GetUInt());
     if (node !is null)
         nodeList.Push(node);
@@ -1041,7 +1168,7 @@ Array<Node@> GetMultipleSourceNodes(UIElement@ source)
         ListView@ listView_ = cast<ListView>(source.parent.parent.parent);
         if (listView_ is null)
             return nodeList;
-        
+
         bool sourceIsSelected = false;
         for (uint i = 0; i < listView_.selectedItems.length; ++i)
         {
@@ -1063,9 +1190,9 @@ Array<Node@> GetMultipleSourceNodes(UIElement@ source)
 
                 if (item_.vars[TYPE_VAR] == ITEM_NODE)
                 {
-                    Node@ node = editorScene.GetNode(item_.vars[NODE_ID_VAR].GetUInt());
-                    if (node !is null)
-                        nodeList.Push(node);
+                    Node@ n = editorScene.GetNode(item_.vars[NODE_ID_VAR].GetUInt());
+                    if (n !is null)
+                        nodeList.Push(n);
                 }
             }
         }
@@ -1088,15 +1215,27 @@ bool TestDragDrop(UIElement@ source, UIElement@ target, int& itemType)
         variant = target.GetVar(NODE_ID_VAR);
         if (!variant.empty)
             targetNode = editorScene.GetNode(variant.GetUInt());
+        Array<Node@> sourceNodes = GetMultipleSourceNodes(source);
 
         if (sourceNode !is null && targetNode !is null)
         {
             itemType = ITEM_NODE;
 
-            if (sourceNode.parent is targetNode)
-                return false;
-            if (targetNode.parent is sourceNode)
-                return false;
+            // Ctrl pressed: reorder
+            if (input.qualifierDown[QUAL_CTRL] && sourceNodes.length == 1)
+            {
+                // Must be within the same parent
+                if (sourceNode.parent is null || sourceNode.parent !is targetNode.parent)
+                    return false;
+            }
+            // No ctrl: Reparent
+            else
+            {
+                if (sourceNode.parent is targetNode)
+                    return false;
+                if (targetNode.parent is sourceNode)
+                    return false;
+            }
         }
 
         // Resource browser
@@ -1104,9 +1243,9 @@ bool TestDragDrop(UIElement@ source, UIElement@ target, int& itemType)
         {
             itemType = ITEM_NODE;
             int type = source.GetVar(TEXT_VAR_RESOURCE_TYPE).GetInt();
-            return type == RESOURCE_TYPE_PREFAB || 
-                type == RESOURCE_TYPE_SCRIPTFILE || 
-                type == RESOURCE_TYPE_MODEL || 
+            return type == RESOURCE_TYPE_PREFAB ||
+                type == RESOURCE_TYPE_SCRIPTFILE ||
+                type == RESOURCE_TYPE_MODEL ||
                 type == RESOURCE_TYPE_PARTICLEEFFECT ||
                 type == RESOURCE_TYPE_2D_PARTICLE_EFFECT;
         }
@@ -1128,18 +1267,29 @@ bool TestDragDrop(UIElement@ source, UIElement@ target, int& itemType)
         {
             itemType = ITEM_UI_ELEMENT;
 
-            if (sourceElement.parent is targetElement)
-                return false;
-            if (targetElement.parent is sourceElement)
-                return false;
+            // Ctrl pressed: reorder
+            if (input.qualifierDown[QUAL_CTRL])
+            {
+                // Must be within the same parent
+                if (sourceElement.parent is null || sourceElement.parent !is targetElement.parent)
+                    return false;
+            }
+            // No ctrl: reparent
+            else
+            {
+                if (sourceElement.parent is targetElement)
+                    return false;
+                if (targetElement.parent is sourceElement)
+                    return false;
+            }
         }
 
         return true;
     }
     else if (targetItemType == ITEM_COMPONENT)
     {
-        // Now only support dragging of nodes to StaticModelGroup, SplinePath or Constraint. Can be expanded to support others
         Node@ sourceNode;
+        Component@ sourceComponent;
         Component@ targetComponent;
         Variant variant = source.GetVar(NODE_ID_VAR);
         if (!variant.empty)
@@ -1147,17 +1297,31 @@ bool TestDragDrop(UIElement@ source, UIElement@ target, int& itemType)
         variant = target.GetVar(COMPONENT_ID_VAR);
         if (!variant.empty)
             targetComponent = editorScene.GetComponent(variant.GetUInt());
+        variant = source.GetVar(COMPONENT_ID_VAR);
+        if (!variant.empty)
+            sourceComponent = editorScene.GetComponent(variant.GetUInt());
+        Array<Node@> sourceNodes = GetMultipleSourceNodes(source);
 
         itemType = ITEM_COMPONENT;
 
-        if (sourceNode !is null && targetComponent !is null && (targetComponent.type == STATICMODELGROUP_TYPE ||
-            targetComponent.type == CONSTRAINT_TYPE || targetComponent.type == SPLINEPATH_TYPE))
-            return true;
+        if (input.qualifierDown[QUAL_CTRL] && sourceNodes.length == 1)
+        {
+            // Reorder components within node
+            if (sourceComponent !is null && targetComponent !is null && sourceComponent.node is targetComponent.node)
+                return true;
+        }
+        else
+        {
+            // Dragging of nodes to StaticModelGroup, SplinePath or Constraint
+            if (sourceNode !is null && targetComponent !is null && (targetComponent.type == STATICMODELGROUP_TYPE ||
+                targetComponent.type == CONSTRAINT_TYPE || targetComponent.type == SPLINEPATH_TYPE))
+                return true;
 
-        // resource browser
-        int type = source.GetVar(TEXT_VAR_RESOURCE_TYPE).GetInt();
-        if (targetComponent.type == STATICMODEL_TYPE || targetComponent.type == ANIMATEDMODEL_TYPE)
-            return type == RESOURCE_TYPE_MATERIAL || type == RESOURCE_TYPE_MODEL;
+            // Resource browser
+            int type = source.GetVar(TEXT_VAR_RESOURCE_TYPE).GetInt();
+            if (targetComponent.type == STATICMODEL_TYPE || targetComponent.type == ANIMATEDMODEL_TYPE)
+                return type == RESOURCE_TYPE_MATERIAL || type == RESOURCE_TYPE_MODEL;
+        }
 
         return false;
     }
@@ -1165,7 +1329,7 @@ bool TestDragDrop(UIElement@ source, UIElement@ target, int& itemType)
     {
         int type = source.GetVar(TEXT_VAR_RESOURCE_TYPE).GetInt();
 
-        // test against resource pickers
+        // Test against resource pickers
         LineEdit@ lineEdit = cast<LineEdit>(target);
         if (lineEdit !is null)
         {
@@ -1266,8 +1430,8 @@ void HandleNodeRemoved(StringHash eventType, VariantMap& eventData)
         return;
 
     Node@ node = eventData["Node"].GetPtr();
-    uint index = GetListIndex(node);
-    UpdateHierarchyItem(index, null, null);
+    if (showTemporaryObject || !node.temporary)
+        UpdateHierarchyItem(GetListIndex(node), null, null);
 }
 
 void HandleComponentAdded(StringHash eventType, VariantMap& eventData)
@@ -1278,7 +1442,7 @@ void HandleComponentAdded(StringHash eventType, VariantMap& eventData)
     // Insert the newly added component at last component position but before the first child node position of the parent node
     Node@ node = eventData["Node"].GetPtr();
     Component@ component = eventData["Component"].GetPtr();
-    if (showTemporaryObject || !component.temporary)
+    if (showTemporaryObject || (!node.temporary && !component.temporary))
     {
         uint nodeIndex = GetListIndex(node);
         if (nodeIndex != NO_ITEM)
@@ -1294,10 +1458,14 @@ void HandleComponentRemoved(StringHash eventType, VariantMap& eventData)
     if (suppressSceneChanges)
         return;
 
+    Node@ node = eventData["Node"].GetPtr();
     Component@ component = eventData["Component"].GetPtr();
-    uint index = GetComponentListIndex(component);
-    if (index != NO_ITEM)
-        hierarchyList.RemoveItem(index);
+    if (showTemporaryObject || (!node.temporary && !component.temporary))
+    {
+        uint index = GetComponentListIndex(component);
+        if (index != NO_ITEM)
+            hierarchyList.RemoveItem(index);
+    }
 }
 
 void HandleNodeNameChanged(StringHash eventType, VariantMap& eventData)
@@ -1306,7 +1474,8 @@ void HandleNodeNameChanged(StringHash eventType, VariantMap& eventData)
         return;
 
     Node@ node = eventData["Node"].GetPtr();
-    UpdateHierarchyItemText(GetListIndex(node), node.enabled, GetNodeTitle(node));
+    if (showTemporaryObject || !node.temporary)
+        UpdateHierarchyItemText(GetListIndex(node), node.enabled, GetNodeTitle(node));
 }
 
 void HandleNodeEnabledChanged(StringHash eventType, VariantMap& eventData)
@@ -1315,8 +1484,11 @@ void HandleNodeEnabledChanged(StringHash eventType, VariantMap& eventData)
         return;
 
     Node@ node = eventData["Node"].GetPtr();
-    UpdateHierarchyItemText(GetListIndex(node), node.enabled);
-    attributesDirty = true;
+    if (showTemporaryObject || !node.temporary)
+    {
+        UpdateHierarchyItemText(GetListIndex(node), node.enabled);
+        attributesDirty = true;
+    }
 }
 
 void HandleComponentEnabledChanged(StringHash eventType, VariantMap& eventData)
@@ -1324,9 +1496,13 @@ void HandleComponentEnabledChanged(StringHash eventType, VariantMap& eventData)
     if (suppressSceneChanges)
         return;
 
+    Node@ node = eventData["Node"].GetPtr();
     Component@ component = eventData["Component"].GetPtr();
-    UpdateHierarchyItemText(GetComponentListIndex(component), component.enabledEffective);
-    attributesDirty = true;
+    if (showTemporaryObject || (!node.temporary && !component.temporary))
+    {
+        UpdateHierarchyItemText(GetComponentListIndex(component), component.enabledEffective);
+        attributesDirty = true;
+    }
 }
 
 void HandleUIElementAdded(StringHash eventType, VariantMap& eventData)
@@ -1403,6 +1579,7 @@ void HandleTemporaryChanged(StringHash eventType, VariantMap& eventData)
     Component@ component = cast<Component>(serializable);
     if (component !is null && component.node !is null && component.node.scene is editorScene)
     {
+        node = component.node;
         if (showTemporaryObject)
             UpdateHierarchyItemText(GetComponentListIndex(component), node.enabled);
         else if (!component.temporary && GetComponentListIndex(component) == NO_ITEM)
@@ -1526,6 +1703,23 @@ bool Paste()
         return ret;
     }
 
+    return false;
+}
+
+bool BlenderModeDelete()
+{
+    if (ui.focusElement is null)
+    {
+        Array<UIElement@> actions;
+        actions.Push(CreateContextMenuItem("Delete?", "HandleBlenderModeDelete"));
+        actions.Push(CreateContextMenuItem("Cancel", "HandleEmpty"));
+
+        if (actions.length > 0)
+        {
+            ActivateContextMenu(actions);
+            return true;
+        }
+    }
     return false;
 }
 
@@ -1666,6 +1860,16 @@ void HandleHierarchyContextDelete()
     Delete();
 }
 
+void HandleBlenderModeDelete()
+{
+    Delete();
+}
+
+void HandleEmpty()
+{
+    //just doing nothing
+}
+
 void HandleHierarchyContextPaste()
 {
     Paste();
@@ -1709,4 +1913,33 @@ void HandleHierarchyContextUIElementCloseUILayout()
 void HandleHierarchyContextUIElementCloseAllUILayouts()
 {
     CloseAllUILayouts();
+}
+
+void CollapseHierarchy()
+{
+    Array<uint> oldSelections = hierarchyList.selections;
+    Array<uint> selections = {0};
+
+    hierarchyList.SetSelections(selections);
+
+    for (uint i = 0; i < selections.length; ++i)
+        hierarchyList.Expand(selections[i], false, true);
+
+    // only scene's scope expand by default
+    hierarchyList.Expand(0, true, false);
+
+    hierarchyList.SetSelections(oldSelections);
+}
+
+void CollapseHierarchy(StringHash eventType, VariantMap& eventData)
+{
+    CollapseHierarchy();
+}
+
+void HandleShowID(StringHash eventType, VariantMap& eventData)
+{
+    CheckBox@ checkBox = eventData["Element"].GetPtr();
+    showID = checkBox.checked;
+    UpdateHierarchyItem(editorScene, false);
+    CollapseHierarchy();
 }

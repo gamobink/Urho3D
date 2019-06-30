@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,15 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../IO/MemoryBuffer.h"
-
-#include <cstring>
-
-#include "../DebugNew.h"
 
 namespace Urho3D
 {
 
 MemoryBuffer::MemoryBuffer(void* data, unsigned size) :
-    Deserializer(size),
+    AbstractFile(size),
     buffer_((unsigned char*)data),
     readOnly_(false)
 {
@@ -39,7 +37,7 @@ MemoryBuffer::MemoryBuffer(void* data, unsigned size) :
 }
 
 MemoryBuffer::MemoryBuffer(const void* data, unsigned size) :
-    Deserializer(size),
+    AbstractFile(size),
     buffer_((unsigned char*)data),
     readOnly_(true)
 {
@@ -48,15 +46,15 @@ MemoryBuffer::MemoryBuffer(const void* data, unsigned size) :
 }
 
 MemoryBuffer::MemoryBuffer(PODVector<unsigned char>& data) :
-    Deserializer(data.Size()),
+    AbstractFile(data.Size()),
     buffer_(data.Begin().ptr_),
     readOnly_(false)
 {
 }
 
 MemoryBuffer::MemoryBuffer(const PODVector<unsigned char>& data) :
-    Deserializer(data.Size()),
-    buffer_(data.Begin().ptr_),
+    AbstractFile(data.Size()),
+    buffer_(const_cast<unsigned char*>(data.Begin().ptr_)),
     readOnly_(true)
 {
 }
@@ -67,28 +65,13 @@ unsigned MemoryBuffer::Read(void* dest, unsigned size)
         size = size_ - position_;
     if (!size)
         return 0;
-    
+
     unsigned char* srcPtr = &buffer_[position_];
-    unsigned char* destPtr = (unsigned char*)dest;
+    auto* destPtr = (unsigned char*)dest;
     position_ += size;
-    
-    unsigned copySize = size;
-    while (copySize >= sizeof(unsigned))
-    {
-        *((unsigned*)destPtr) = *((unsigned*)srcPtr);
-        srcPtr += sizeof(unsigned);
-        destPtr += sizeof(unsigned);
-        copySize -= sizeof(unsigned);
-    }
-    if (copySize & sizeof(unsigned short))
-    {
-        *((unsigned short*)destPtr) = *((unsigned short*)srcPtr);
-        srcPtr += sizeof(unsigned short);
-        destPtr += sizeof(unsigned short);
-    }
-    if (copySize & 1)
-        *destPtr = *srcPtr;
-    
+
+    memcpy(destPtr, srcPtr, size);
+
     return size;
 }
 
@@ -96,7 +79,7 @@ unsigned MemoryBuffer::Seek(unsigned position)
 {
     if (position > size_)
         position = size_;
-    
+
     position_ = position;
     return position_;
 }
@@ -107,28 +90,13 @@ unsigned MemoryBuffer::Write(const void* data, unsigned size)
         size = size_ - position_;
     if (!size)
         return 0;
-    
-    unsigned char* srcPtr = (unsigned char*)data;
+
+    auto* srcPtr = (unsigned char*)data;
     unsigned char* destPtr = &buffer_[position_];
     position_ += size;
-    
-    unsigned copySize = size;
-    while (copySize >= sizeof(unsigned))
-    {
-        *((unsigned*)destPtr) = *((unsigned*)srcPtr);
-        srcPtr += sizeof(unsigned);
-        destPtr += sizeof(unsigned);
-        copySize -= sizeof(unsigned);
-    }
-    if (copySize & sizeof(unsigned short))
-    {
-        *((unsigned short*)destPtr) = *((unsigned short*)srcPtr);
-        srcPtr += sizeof(unsigned short);
-        destPtr += sizeof(unsigned short);
-    }
-    if (copySize & 1)
-        *destPtr = *srcPtr;
-    
+
+    memcpy(destPtr, srcPtr, size);
+
     return size;
 }
 

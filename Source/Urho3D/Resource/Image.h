@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,59 +50,48 @@ enum CompressedFormat
 /// Compressed image mip level.
 struct CompressedLevel
 {
-    /// Construct empty.
-    CompressedLevel() :
-        data_(0),
-        width_(0),
-        height_(0),
-        depth_(0),
-        blockSize_(0),
-        dataSize_(0),
-        rowSize_(0),
-        rows_(0)
-    {
-    }
-
     /// Decompress to RGBA. The destination buffer required is width * height * 4 bytes. Return true if successful.
     bool Decompress(unsigned char* dest);
 
     /// Compressed image data.
-    unsigned char* data_;
+    unsigned char* data_{};
     /// Compression format.
-    CompressedFormat format_;
+    CompressedFormat format_{CF_NONE};
     /// Width.
-    int width_;
+    int width_{};
     /// Height.
-    int height_;
+    int height_{};
     /// Depth.
-    int depth_;
+    int depth_{};
     /// Block size in bytes.
-    unsigned blockSize_;
+    unsigned blockSize_{};
     /// Total data size in bytes.
-    unsigned dataSize_;
+    unsigned dataSize_{};
     /// Row size in bytes.
-    unsigned rowSize_;
+    unsigned rowSize_{};
     /// Number of rows.
-    unsigned rows_;
+    unsigned rows_{};
 };
 
 /// %Image resource.
 class URHO3D_API Image : public Resource
 {
-    OBJECT(Image);
+    URHO3D_OBJECT(Image, Resource);
 
 public:
     /// Construct empty.
-    Image(Context* context);
+    explicit Image(Context* context);
     /// Destruct.
-    virtual ~Image();
+    ~Image() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Load resource from stream. May be called from a worker thread. Return true if successful.
-    virtual bool BeginLoad(Deserializer& source);
+    bool BeginLoad(Deserializer& source) override;
     /// Save the image to a stream. Regardless of original format, the image is saved as png. Compressed image data is not supported. Return true if successful.
-    virtual bool Save(Serializer& dest) const;
+    bool Save(Serializer& dest) const override;
+    /// Save the image to a file. Format of the image is determined by file extension. JPG is saved with maximum quality.
+    bool SaveFile(const String& fileName) const override;
 
     /// Set 2D size and number of color components. Old image data will be destroyed and new data is undefined. Return true if successful.
     bool SetSize(int width, int height, unsigned components);
@@ -136,8 +125,18 @@ public:
     bool SavePNG(const String& fileName) const;
     /// Save in TGA format. Return true if successful.
     bool SaveTGA(const String& fileName) const;
-    /// Save in JPG format with compression quality. Return true if successful.
+    /// Save in JPG format with specified quality. Return true if successful.
     bool SaveJPG(const String& fileName, int quality) const;
+    /// Save in DDS format. Only uncompressed RGBA images are supported. Return true if successful.
+    bool SaveDDS(const String& fileName) const;
+    /// Save in WebP format with minimum (fastest) or specified compression. Return true if successful. Fails always if WebP support is not compiled in.
+    bool SaveWEBP(const String& fileName, float compression = 0.0f) const;
+    /// Whether this texture is detected as a cubemap, only relevant for DDS.
+    bool IsCubemap() const { return cubemap_; }
+    /// Whether this texture has been detected as a volume, only relevant for DDS.
+    bool IsArray() const { return array_; }
+    /// Whether this texture is in sRGB, only relevant for DDS.
+    bool IsSRGB() const { return sRGB_; }
 
     /// Return a 2D pixel color.
     Color GetPixel(int x, int y) const;
@@ -151,24 +150,37 @@ public:
     Color GetPixelBilinear(float x, float y) const;
     /// Return a trilinearly sampled 3D pixel color. X, Y and Z have the range 0-1.
     Color GetPixelTrilinear(float x, float y, float z) const;
+
     /// Return width.
     int GetWidth() const { return width_; }
+
     /// Return height.
     int GetHeight() const { return height_; }
+
     /// Return depth.
     int GetDepth() const { return depth_; }
+
     /// Return number of color components.
     unsigned GetComponents() const { return components_; }
+
     /// Return pixel data.
     unsigned char* GetData() const { return data_; }
+
     /// Return whether is compressed.
     bool IsCompressed() const { return compressedFormat_ != CF_NONE; }
+
     /// Return compressed format.
     CompressedFormat GetCompressedFormat() const { return compressedFormat_; }
-    /// Return number of compressed mip levels.
+
+    /// Return number of compressed mip levels. Returns 0 if the image is has not been loaded from a source file containing multiple mip levels.
     unsigned GetNumCompressedLevels() const { return numCompressedLevels_; }
-    /// Return next mip level by bilinear filtering.
+
+    /// Return next mip level by bilinear filtering. Note that if the image is already 1x1x1, will keep returning an image of that size.
     SharedPtr<Image> GetNextLevel() const;
+    /// Return the next sibling image of an array or cubemap.
+    SharedPtr<Image> GetNextSibling() const { return nextSibling_;  }
+    /// Return image converted to 4-component (RGBA) to circumvent modern rendering API's not supporting e.g. the luminance-alpha format.
+    SharedPtr<Image> ConvertToRGBA() const;
     /// Return a compressed mip level.
     CompressedLevel GetCompressedLevel(unsigned index) const;
     /// Return subimage from the image by the defined rect or null if failed. 3D images are not supported. You must free the subimage yourself.
@@ -177,6 +189,16 @@ public:
     SDL_Surface* GetSDLSurface(const IntRect& rect = IntRect::ZERO) const;
     /// Precalculate the mip levels. Used by asynchronous texture loading.
     void PrecalculateLevels();
+    /// Whether this texture has an alpha channel
+    bool HasAlphaChannel() const;
+    /// Copy contents of the image into the defined rect, scaling if necessary. This image should already be large enough to include the rect. Compressed and 3D images are not supported.
+    bool SetSubimage(const Image* image, const IntRect& rect);
+    /// Clean up the mip levels.
+    void CleanupLevels();
+    /// Get all stored mip levels starting from this.
+    void GetLevels(PODVector<Image*>& levels);
+    /// Get all stored mip levels starting from this.
+    void GetLevels(PODVector<const Image*>& levels) const;
 
 private:
     /// Decode an image using stb_image.
@@ -185,21 +207,29 @@ private:
     static void FreeImageData(unsigned char* pixelData);
 
     /// Width.
-    int width_;
+    int width_{};
     /// Height.
-    int height_;
+    int height_{};
     /// Depth.
-    int depth_;
+    int depth_{};
     /// Number of color components.
-    unsigned components_;
+    unsigned components_{};
     /// Number of compressed mip levels.
-    unsigned numCompressedLevels_;
+    unsigned numCompressedLevels_{};
+    /// Cubemap status if DDS.
+    bool cubemap_{};
+    /// Texture array status if DDS.
+    bool array_{};
+    /// Data is sRGB.
+    bool sRGB_{};
     /// Compressed format.
-    CompressedFormat compressedFormat_;
+    CompressedFormat compressedFormat_{CF_NONE};
     /// Pixel data.
     SharedArrayPtr<unsigned char> data_;
     /// Precalculated mip level image.
     SharedPtr<Image> nextLevel_;
+    /// Next texture array or cube map image.
+    SharedPtr<Image> nextSibling_;
 };
 
 }

@@ -70,13 +70,19 @@ class GameObject : ScriptObject
 
     void PlaySound(const String&in soundName)
     {
-        // Create the sound channel
         SoundSource3D@ source = node.CreateComponent("SoundSource3D");
         Sound@ sound = cache.GetResource("Sound", soundName);
+        // Subscribe to sound finished for cleaning up the source
+        SubscribeToEvent(node, "SoundFinished", "HandleSoundFinished");
 
         source.SetDistanceAttenuation(2, 50, 1);
         source.Play(sound);
-        source.autoRemove = true;
+    }
+    
+    void HandleSoundFinished(StringHash eventType, VariantMap& eventData)
+    {
+        SoundSource3D@ source = eventData["SoundSource"].GetPtr();
+        source.Remove();
     }
 
     void HandleNodeCollision(StringHash eventType, VariantMap& eventData)
@@ -104,15 +110,15 @@ class GameObject : ScriptObject
             float contactDistance = contacts.ReadFloat();
             float contactImpulse = contacts.ReadFloat();
 
-            // If contact is below node center and mostly vertical, assume it's ground contact
+            // If contact is below node center and pointing up, assume it's ground contact
             if (contactPosition.y < node.position.y)
             {
-                float level = Abs(contactNormal.y);
+                float level = contactNormal.y;
                 if (level > 0.75)
                     onGround = true;
                 else
                 {
-                    // If contact is somewhere inbetween vertical/horizontal, is sliding a slope
+                    // If contact is somewhere between vertical/horizontal, is sliding a slope
                     if (level > 0.1)
                         isSliding = true;
                 }

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,13 +30,13 @@ namespace Urho3D
 /// 2D prismatic constraint component.
 class URHO3D_API ConstraintPrismatic2D : public Constraint2D
 {
-    OBJECT(ConstraintPrismatic2D);
+    URHO3D_OBJECT(ConstraintPrismatic2D, Constraint2D);
 
 public:
     /// Construct.
-    ConstraintPrismatic2D(Context* scontext);
+    explicit ConstraintPrismatic2D(Context* context);
     /// Destruct.
-    virtual ~ConstraintPrismatic2D();
+    ~ConstraintPrismatic2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
@@ -59,24 +59,31 @@ public:
 
     /// Return anchor.
     const Vector2& GetAnchor() const { return anchor_; }
+
     /// Return axis.
     const Vector2& GetAxis() const { return axis_; }
+
     /// Return enable limit.
     bool GetEnableLimit() const { return jointDef_.enableLimit; }
+
     /// Return lower translation.
     float GetLowerTranslation() const { return jointDef_.lowerTranslation; }
+
     /// Return upper translation.
     float GetUpperTranslation() const { return jointDef_.upperTranslation; }
+
     /// Return enable motor.
     bool GetEnableMotor() const { return jointDef_.enableMotor; }
+
     /// Return maxmotor force.
     float GetMaxMotorForce() const { return jointDef_.maxMotorForce; }
+
     /// Return motor speed.
     float GetMotorSpeed() const { return jointDef_.motorSpeed; }
 
 private:
     /// Return joint def.
-    virtual b2JointDef* GetJointDef();
+    b2JointDef* GetJointDef() override;
 
     /// Box2D joint def.
     b2PrismaticJointDef jointDef_;

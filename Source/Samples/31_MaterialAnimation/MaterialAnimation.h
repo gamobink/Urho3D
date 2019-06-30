@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,14 +37,14 @@ class Scene;
 ///     - Usage of material shader animation for mush room material
 class MaterialAnimation : public Sample
 {
-    OBJECT(MaterialAnimation);
+    URHO3D_OBJECT(MaterialAnimation, Sample);
 
 public:
     /// Construct.
-    MaterialAnimation(Context* context);
+    explicit MaterialAnimation(Context* context);
 
     /// Setup after engine initialization and before running the main loop.
-    virtual void Start();
+    void Start() override;
 
 private:
     /// Construct the scene content.

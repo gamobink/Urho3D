@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,12 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../Input/InputEvents.h"
 #include "../IO/Log.h"
+#include "../UI/LineEdit.h"
 #include "../UI/Menu.h"
 #include "../UI/UI.h"
 #include "../UI/UIEvents.h"
@@ -48,10 +51,10 @@ Menu::Menu(Context* context) :
 {
     focusMode_ = FM_NOTFOCUSABLE;
 
-    SubscribeToEvent(this, E_PRESSED, HANDLER(Menu, HandlePressedReleased));
-    SubscribeToEvent(this, E_RELEASED, HANDLER(Menu, HandlePressedReleased));
-    SubscribeToEvent(E_UIMOUSECLICK, HANDLER(Menu, HandleFocusChanged));
-    SubscribeToEvent(E_FOCUSCHANGED, HANDLER(Menu, HandleFocusChanged));
+    SubscribeToEvent(this, E_PRESSED, URHO3D_HANDLER(Menu, HandlePressedReleased));
+    SubscribeToEvent(this, E_RELEASED, URHO3D_HANDLER(Menu, HandlePressedReleased));
+    SubscribeToEvent(E_UIMOUSECLICK, URHO3D_HANDLER(Menu, HandleFocusChanged));
+    SubscribeToEvent(E_FOCUSCHANGED, URHO3D_HANDLER(Menu, HandleFocusChanged));
 }
 
 Menu::~Menu()
@@ -64,21 +67,21 @@ void Menu::RegisterObject(Context* context)
 {
     context->RegisterFactory<Menu>(UI_CATEGORY);
 
-    COPY_BASE_ATTRIBUTES(Button);
-    UPDATE_ATTRIBUTE_DEFAULT_VALUE("Focus Mode", FM_NOTFOCUSABLE);
-    ACCESSOR_ATTRIBUTE("Popup Offset", GetPopupOffset, SetPopupOffset, IntVector2, IntVector2::ZERO, AM_FILE);
+    URHO3D_COPY_BASE_ATTRIBUTES(Button);
+    URHO3D_UPDATE_ATTRIBUTE_DEFAULT_VALUE("Focus Mode", FM_NOTFOCUSABLE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Popup Offset", GetPopupOffset, SetPopupOffset, IntVector2, IntVector2::ZERO, AM_FILE);
 }
 
 void Menu::Update(float timeStep)
 {
     Button::Update(timeStep);
-    
+
     if (popup_ && showPopup_)
     {
         const Vector<SharedPtr<UIElement> >& children = popup_->GetChildren();
         for (unsigned i = 0; i < children.Size(); ++i)
         {
-            Menu* menu = dynamic_cast<Menu*>(children[i].Get());
+            auto* menu = dynamic_cast<Menu*>(children[i].Get());
             if (menu && !menu->autoPopup_ && !menu->IsHovering())
                 menu->autoPopup_ = true;
         }
@@ -89,7 +92,7 @@ void Menu::OnHover(const IntVector2& position, const IntVector2& screenPosition,
 {
     Button::OnHover(position, screenPosition, buttons, qualifiers, cursor);
 
-    Menu* sibling = static_cast<Menu*>(parent_->GetChild(VAR_SHOW_POPUP, true));
+    auto* sibling = parent_->GetChildStaticCast<Menu>(VAR_SHOW_POPUP, true);
     if (popup_ && !showPopup_)
     {
         // Check if popup is shown by one of the siblings
@@ -104,7 +107,7 @@ void Menu::OnHover(const IntVector2& position, const IntVector2& screenPosition,
         if (autoPopup_)
         {
             // Show popup when parent menu has its popup shown
-            Menu* parentMenu = static_cast<Menu*>(parent_->GetVar(VAR_ORIGIN).GetPtr());
+            auto* parentMenu = static_cast<Menu*>(parent_->GetVar(VAR_ORIGIN).GetPtr());
             if (parentMenu && parentMenu->showPopup_)
                 ShowPopup(true);
         }
@@ -121,7 +124,7 @@ void Menu::OnShowPopup()
 {
 }
 
-bool Menu::LoadXML(const XMLElement& source, XMLFile* styleFile, bool setInstanceDefault)
+bool Menu::LoadXML(const XMLElement& source, XMLFile* styleFile)
 {
     // Get style override if defined
     String styleName = source.GetAttribute("style");
@@ -151,7 +154,7 @@ bool Menu::LoadXML(const XMLElement& source, XMLFile* styleFile, bool setInstanc
     }
 
     // Then load rest of the attributes from the source
-    if (!Serializable::LoadXML(source, setInstanceDefault))
+    if (!Serializable::LoadXML(source))
         return false;
 
     unsigned nextInternalChild = 0;
@@ -166,7 +169,7 @@ bool Menu::LoadXML(const XMLElement& source, XMLFile* styleFile, bool setInstanc
         if (typeName.Empty())
             typeName = "UIElement";
         unsigned index = childElem.HasAttribute("index") ? childElem.GetUInt("index") : M_MAX_UNSIGNED;
-        UIElement* child = 0;
+        UIElement* child = nullptr;
 
         if (!internalElem)
         {
@@ -177,7 +180,7 @@ bool Menu::LoadXML(const XMLElement& source, XMLFile* styleFile, bool setInstanc
                 // Do not add the popup element as a child even temporarily, as that can break layouts
                 SharedPtr<UIElement> popup = DynamicCast<UIElement>(context_->CreateObject(typeName));
                 if (!popup)
-                    LOGERROR("Could not create popup element type " + typeName);
+                    URHO3D_LOGERROR("Could not create popup element type " + typeName);
                 else
                 {
                     child = popup;
@@ -203,7 +206,7 @@ bool Menu::LoadXML(const XMLElement& source, XMLFile* styleFile, bool setInstanc
                 }
 
                 if (!child)
-                    LOGWARNING("Could not find matching internal child element of type " + typeName + " in " + GetTypeName());
+                    URHO3D_LOGWARNING("Could not find matching internal child element of type " + typeName + " in " + GetTypeName());
             }
         }
 
@@ -217,7 +220,7 @@ bool Menu::LoadXML(const XMLElement& source, XMLFile* styleFile, bool setInstanc
             if (popupElem)
                 child->SetDefaultStyle(styleFile);
 
-            if (!child->LoadXML(childElem, styleFile, setInstanceDefault))
+            if (!child->LoadXML(childElem, styleFile))
                 return false;
         }
 
@@ -245,7 +248,7 @@ bool Menu::SaveXML(XMLElement& dest) const
         // Filter popup implicit attributes
         if (!FilterPopupImplicitAttributes(childElem))
         {
-            LOGERROR("Could not remove popup implicit attributes");
+            URHO3D_LOGERROR("Could not remove popup implicit attributes");
             return false;
         }
     }
@@ -261,7 +264,7 @@ void Menu::SetPopup(UIElement* popup)
     // Currently only allow popup 'window'
     if (popup->GetType() != Window::GetTypeStatic())
     {
-        LOGERROR("Could not set popup element of type " + popup->GetTypeName() + ", only support popup window for now");
+        URHO3D_LOGERROR("Could not set popup element of type " + popup->GetTypeName() + ", only support popup window for now");
         return;
     }
 
@@ -312,7 +315,7 @@ void Menu::ShowPopup(bool enable)
         popup_->GetChildren(children, true);
         for (PODVector<UIElement*>::ConstIterator i = children.Begin(); i != children.End(); ++i)
         {
-            Menu* menu = dynamic_cast<Menu*>(*i);
+            auto* menu = dynamic_cast<Menu*>(*i);
             if (menu)
                 menu->ShowPopup(false);
         }
@@ -331,11 +334,11 @@ void Menu::ShowPopup(bool enable)
 
 void Menu::SetAccelerator(int key, int qualifiers)
 {
-    acceleratorKey_ = key;
+    acceleratorKey_ = ToLower(key);
     acceleratorQualifiers_ = qualifiers;
 
     if (key)
-        SubscribeToEvent(E_KEYDOWN, HANDLER(Menu, HandleKeyDown));
+        SubscribeToEvent(E_KEYDOWN, URHO3D_HANDLER(Menu, HandleKeyDown));
     else
         UnsubscribeFromEvent(E_KEYDOWN);
 }
@@ -387,7 +390,7 @@ void Menu::HandleFocusChanged(StringHash eventType, VariantMap& eventData)
 
     using namespace FocusChanged;
 
-    UIElement* element = static_cast<UIElement*>(eventData[P_ELEMENT].GetPtr());
+    auto* element = static_cast<UIElement*>(eventData[P_ELEMENT].GetPtr());
     UIElement* root = GetRoot();
 
     // If another element was focused due to the menu button being clicked, do not hide the popup
@@ -424,11 +427,14 @@ void Menu::HandleKeyDown(StringHash eventType, VariantMap& eventData)
     using namespace KeyDown;
 
     // Activate if accelerator key pressed
-    if (eventData[P_KEY].GetInt() == acceleratorKey_ && (acceleratorQualifiers_ == QUAL_ANY || eventData[P_QUALIFIERS].GetInt() ==
-        acceleratorQualifiers_) && eventData[P_REPEAT].GetBool() == false)
+    if (eventData[P_KEY].GetInt() == acceleratorKey_ &&
+        (acceleratorQualifiers_ == QUAL_ANY || eventData[P_QUALIFIERS].GetInt() == acceleratorQualifiers_) &&
+        eventData[P_REPEAT].GetBool() == false)
     {
-        // Ignore if UI has modal element
-        if (GetSubsystem<UI>()->HasModalElement())
+        // Ignore if UI has modal element or focused LineEdit
+        auto* ui = GetSubsystem<UI>();
+        UIElement* focusElement = ui->GetFocusElement();
+        if (ui->HasModalElement() || (focusElement && focusElement->GetType() == LineEdit::GetTypeStatic()))
             return;
 
         HandlePressedReleased(eventType, eventData);

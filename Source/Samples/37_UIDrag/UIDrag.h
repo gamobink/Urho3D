@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,21 +34,22 @@ namespace Urho3D
 /// This sample demonstrates:
 ///     - Creating GUI elements from C++
 ///     - Loading GUI Style from xml
-///     - Subscribing to GUI drag events and handling them.
+///     - Subscribing to GUI drag events and handling them
+///     - Working with GUI elements with specific tags.
 class UIDrag : public Sample
 {
-    OBJECT(UIDrag);
+    URHO3D_OBJECT(UIDrag, Sample);
 
 public:
     /// Construct.
-    UIDrag(Context* context);
+    explicit UIDrag(Context* context);
 
     /// Setup after engine initialization and before running the main loop.
-    virtual void Start();
+    void Start() override;
 
 protected:
     /// Return XML patch instructions for screen joystick layout for a specific sample app, if any.
-    virtual String GetScreenJoystickPatchString() const { return
+    String GetScreenJoystickPatchString() const override { return
         "<patch>"
         "    <add sel=\"/element/element[./attribute[@name='Name' and @value='Hat0']]\">"
         "        <attribute name=\"Is Visible\" value=\"false\" />"
@@ -65,10 +66,8 @@ private:
     void SubscribeToEvents();
 
     void HandleUpdate(StringHash eventType, VariantMap& eventData);
+    void HandleClick(StringHash eventType, VariantMap& eventData);
     void HandleDragBegin(StringHash eventType, VariantMap& eventData);
     void HandleDragMove(StringHash eventType, VariantMap& eventData);
     void HandleDragCancel(StringHash eventType, VariantMap& eventData);
-    void HandleDragEnd(StringHash eventType, VariantMap& eventData);
-    void HandleTextFinished(StringHash eventType, VariantMap& eventData);
-    void HandleLineEditDragBegin(StringHash eventType, VariantMap& eventData);
 };

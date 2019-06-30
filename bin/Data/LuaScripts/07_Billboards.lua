@@ -22,6 +22,9 @@ function Start()
     -- Setup the viewport for displaying the scene
     SetupViewport()
 
+    -- Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_RELATIVE)
+
     -- Hook up to the frame update and render post-update events
     SubscribeToEvents()
 end
@@ -104,7 +107,7 @@ function CreateScene()
             bb.enabled = true
         end
 
-        -- After modifying the billboards, they need to be "commited" so that the BillboardSet updates its internals
+        -- After modifying the billboards, they need to be "committed" so that the BillboardSet updates its internals
         billboardObject:Commit()
 
         table.insert(billboardNodes, smokeNode)
@@ -251,7 +254,7 @@ end
 
 function HandleUpdate(eventType, eventData)
     -- Take the frame time step, which is stored as a float
-    local timeStep = eventData:GetFloat("TimeStep")
+    local timeStep = eventData["TimeStep"]:GetFloat()
 
     -- Move the camera and animate the scene, scale movement with time step
     MoveCamera(timeStep)

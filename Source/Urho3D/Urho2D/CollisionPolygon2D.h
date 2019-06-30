@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,13 +30,13 @@ namespace Urho3D
 /// 2D polygon collision component.
 class URHO3D_API CollisionPolygon2D : public CollisionShape2D
 {
-    OBJECT(CollisionPolygon2D);
+    URHO3D_OBJECT(CollisionPolygon2D, CollisionShape2D);
 
 public:
     /// Construct.
-    CollisionPolygon2D(Context* scontext);
+    explicit CollisionPolygon2D(Context* context);
     /// Destruct.
-    virtual ~CollisionPolygon2D();
+    ~CollisionPolygon2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
@@ -49,8 +49,10 @@ public:
 
     /// Return vertex count.
     unsigned GetVertexCount() const { return vertices_.Size(); }
+
     /// Return vertex.
     const Vector2& GetVertex(unsigned index) const { return (index < vertices_.Size()) ? vertices_[index] : Vector2::ZERO; }
+
     /// Return vertices.
     const PODVector<Vector2>& GetVertices() const { return vertices_; }
 
@@ -61,7 +63,7 @@ public:
 
 private:
     /// Apply node world scale.
-    virtual void ApplyNodeWorldScale();
+    void ApplyNodeWorldScale() override;
     /// Recreate fixture.
     void RecreateFixture();
 

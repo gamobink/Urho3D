@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "../Scene/Component.h"
+
 #include <Box2D/Box2D.h>
 
 namespace Urho3D
@@ -33,18 +34,18 @@ class RigidBody2D;
 /// 2D collision shape component.
 class URHO3D_API CollisionShape2D : public Component
 {
-    OBJECT(CollisionShape2D);
+    URHO3D_OBJECT(CollisionShape2D, Component);
 
 public:
     /// Construct.
-    CollisionShape2D(Context* scontext);
+    explicit CollisionShape2D(Context* context);
     /// Destruct.
-    virtual ~CollisionShape2D();
+    ~CollisionShape2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Handle enabled/disabled state change.
-    virtual void OnSetEnabled();
+    void OnSetEnabled() override;
 
     /// Set trigger.
     void SetTrigger(bool trigger);
@@ -68,18 +69,25 @@ public:
 
     /// Return trigger.
     bool IsTrigger() const { return fixtureDef_.isSensor; }
+
     /// Return filter category bits.
     int GetCategoryBits() const { return fixtureDef_.filter.categoryBits; }
+
     /// Return filter mask bits.
     int GetMaskBits() const { return fixtureDef_.filter.maskBits; }
+
     /// Return filter group index.
     int GetGroupIndex() const { return fixtureDef_.filter.groupIndex; }
+
     /// Return density.
     float GetDensity() const { return fixtureDef_.density; }
+
     /// Return friction.
     float GetFriction() const { return fixtureDef_.friction; }
+
     /// Return restitution.
     float GetRestitution() const { return fixtureDef_.restitution; }
+
     /// Return mass.
     float GetMass() const;
     /// Return inertia.
@@ -88,16 +96,16 @@ public:
     Vector2 GetMassCenter() const;
 
     /// Return fixture.
-    b2Fixture* GetFixture() const { return fixture_;}
+    b2Fixture* GetFixture() const { return fixture_; }
 
 protected:
     /// Handle node being assigned.
-    virtual void OnNodeSet(Node* node);
+    void OnNodeSet(Node* node) override;
     /// Handle node transform being dirtied.
-    virtual void OnMarkedDirty(Node* node);
+    void OnMarkedDirty(Node* node) override;
     /// Apply Node world scale.
     virtual void ApplyNodeWorldScale() = 0;
-    
+
     /// Rigid body.
     WeakPtr<RigidBody2D> rigidBody_;
     /// Fixture def.

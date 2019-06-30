@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,36 +27,45 @@
 namespace Urho3D
 {
 
-/// Pushbutton %UI element.
+/// Push button %UI element.
 class URHO3D_API Button : public BorderImage
 {
-    OBJECT(Button);
-    
+    URHO3D_OBJECT(Button, BorderImage);
+
 public:
     /// Construct.
-    Button(Context* context);
+    explicit Button(Context* context);
     /// Destruct.
-    virtual ~Button();
+    ~Button() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
-    
+
     /// Perform UI element update.
-    virtual void Update(float timeStep);
+    void Update(float timeStep) override;
     /// Return UI rendering batches.
-    virtual void GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor);
+    void GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor) override;
     /// React to mouse click begin.
-    virtual void OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor);
+    void OnClickBegin
+        (const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor) override;
     /// React to mouse click end.
-    virtual void OnClickEnd(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor, UIElement* beginElement);
+    void OnClickEnd
+        (const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor,
+            UIElement* beginElement) override;
     /// React to mouse drag motion.
-    virtual void OnDragMove(const IntVector2& position, const IntVector2& screenPosition, int buttons, int qualifiers, Cursor* cursor);
+    void OnDragMove
+        (const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons, int qualifiers,
+            Cursor* cursor) override;
     /// React to a key press.
-    virtual void OnKey(int key, int buttons, int qualifiers);
+    void OnKey(Key key, MouseButtonFlags buttons, QualifierFlags qualifiers) override;
 
     /// Set offset to image rectangle used when pressed.
     void SetPressedOffset(const IntVector2& offset);
     /// Set offset to image rectangle used when pressed.
     void SetPressedOffset(int x, int y);
+    /// Set offset to image rectangle used when disabled.
+    void SetDisabledOffset(const IntVector2& offset);
+    /// Set offset to image rectangle used when disabled.
+    void SetDisabledOffset(int x, int y);
     /// Set offset of child elements when pressed.
     void SetPressedChildOffset(const IntVector2& offset);
     /// Set offset of child elements when pressed.
@@ -67,24 +76,33 @@ public:
     void SetRepeatDelay(float delay);
     /// Set repeat rate.
     void SetRepeatRate(float rate);
-    
+
     /// Return pressed image offset.
     const IntVector2& GetPressedOffset() const { return pressedOffset_; }
+
+    /// Return disabled image offset.
+    const IntVector2& GetDisabledOffset() const { return disabledOffset_; }
+
     /// Return offset of child elements when pressed.
     const IntVector2& GetPressedChildOffset() const { return pressedChildOffset_; }
+
     /// Return repeat delay.
     float GetRepeatDelay() const { return repeatDelay_; }
+
     /// Return repeat rate.
     float GetRepeatRate() const { return repeatRate_; }
+
     /// Return whether is currently pressed.
     bool IsPressed() const { return pressed_; }
 
 protected:
     /// Set new pressed state.
     void SetPressed(bool enable);
-    
+
     /// Pressed image offset.
     IntVector2 pressedOffset_;
+    /// Disabled image offset.
+    IntVector2 disabledOffset_;
     /// Pressed label offset.
     IntVector2 pressedChildOffset_;
     /// Repeat delay.

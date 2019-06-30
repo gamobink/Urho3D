@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,15 +41,15 @@ class Vehicle;
 ///     - Defining attributes (including node and component references) of a custom component so that it can be saved and loaded
 class VehicleDemo : public Sample
 {
-    OBJECT(VehicleDemo);
+    URHO3D_OBJECT(VehicleDemo, Sample);
 
 public:
     /// Construct.
-    VehicleDemo(Context* context);
-    
+    explicit VehicleDemo(Context* context);
+
     /// Setup after engine initialization and before running the main loop.
-    virtual void Start();
-    
+    void Start() override;
+
 private:
     /// Create static scene content.
     void CreateScene();
@@ -63,7 +63,7 @@ private:
     void HandleUpdate(StringHash eventType, VariantMap& eventData);
     /// Handle application post-update. Update camera position after vehicle has moved.
     void HandlePostUpdate(StringHash eventType, VariantMap& eventData);
-    
+
     /// The controllable vehicle component.
     WeakPtr<Vehicle> vehicle_;
 };

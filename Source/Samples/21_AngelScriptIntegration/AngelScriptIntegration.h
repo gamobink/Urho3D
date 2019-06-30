@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,14 +38,14 @@ class Scene;
 ///     - Creating a 3D scene and using a script object to animate the objects
 class AngelScriptIntegration : public Sample
 {
-    OBJECT(AngelScriptIntegration);
+    URHO3D_OBJECT(AngelScriptIntegration, Sample);
 
 public:
     /// Construct.
-    AngelScriptIntegration(Context* context);
+    explicit AngelScriptIntegration(Context* context);
 
     /// Setup after engine initialization and before running the main loop.
-    virtual void Start();
+    void Start() override;
 
 private:
     /// Construct the scene content.

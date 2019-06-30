@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,13 +30,13 @@ namespace Urho3D
 /// 2D mouse constraint component.
 class URHO3D_API ConstraintMouse2D : public Constraint2D
 {
-    OBJECT(ConstraintMouse2D);
+    URHO3D_OBJECT(ConstraintMouse2D, Constraint2D);
 
 public:
     /// Construct.
-    ConstraintMouse2D(Context* scontext);
+    explicit ConstraintMouse2D(Context* context);
     /// Destruct.
-    virtual ~ConstraintMouse2D();
+    ~ConstraintMouse2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
@@ -51,23 +51,24 @@ public:
 
     /// Return target.
     const Vector2& GetTarget() const { return target_; }
+
     /// Return max force.
     float GetMaxForce() const { return jointDef_.maxForce; }
+
     /// Return frequency Hz.
     float GetFrequencyHz() const { return jointDef_.frequencyHz; }
+
     /// Return damping ratio.
     float GetDampingRatio() const { return jointDef_.dampingRatio; }
 
 private:
     /// Return joint def.
-    virtual b2JointDef* GetJointDef();
+    b2JointDef* GetJointDef() override;
 
     /// Box2D joint def.
-    b2MouseJointDef jointDef_; 
+    b2MouseJointDef jointDef_;
     /// Target.
     Vector2 target_;
-    /// Target setted.
-    bool targetSetted_;
 };
 
 }

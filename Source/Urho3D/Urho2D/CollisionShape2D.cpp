@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,24 +20,24 @@
 // THE SOFTWARE.
 //
 
-#include "../Urho2D/CollisionShape2D.h"
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../IO/Log.h"
 #include "../Scene/Node.h"
+#include "../Scene/Scene.h"
+#include "../Urho2D/CollisionShape2D.h"
 #include "../Urho2D/PhysicsUtils2D.h"
 #include "../Urho2D/RigidBody2D.h"
-#include "../Scene/Scene.h"
 
 #include "../DebugNew.h"
 
 namespace Urho3D
 {
 
-extern const char* URHO2D_CATEGORY;
-
 CollisionShape2D::CollisionShape2D(Context* context) :
-    Component(context), 
-    fixture_(0),
+    Component(context),
+    fixture_(nullptr),
     cachedWorldScale_(Vector3::ONE)
 {
 
@@ -53,13 +53,13 @@ CollisionShape2D::~CollisionShape2D()
 
 void CollisionShape2D::RegisterObject(Context* context)
 {
-    ACCESSOR_ATTRIBUTE("Trigger", IsTrigger, SetTrigger, bool, false, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Category Bits", GetCategoryBits, SetCategoryBits, int, 0, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Mask Bits", GetMaskBits, SetMaskBits, int, 0, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Group Index", GetGroupIndex, SetGroupIndex, int, 0, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Density", GetDensity, SetDensity, float, 0.0f, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Friction", GetFriction, SetFriction, float, 0.2f, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Restitution", GetRestitution, SetRestitution, float, 0.0f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Trigger", IsTrigger, SetTrigger, bool, false, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Category Bits", GetCategoryBits, SetCategoryBits, int, 0, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Mask Bits", GetMaskBits, SetMaskBits, int, 0, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Group Index", GetGroupIndex, SetGroupIndex, int, 0, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Density", GetDensity, SetDensity, float, 0.0f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Friction", GetFriction, SetFriction, float, 0.2f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Restitution", GetRestitution, SetRestitution, float, 0.0f, AM_DEFAULT);
 }
 
 void CollisionShape2D::OnSetEnabled()
@@ -87,7 +87,7 @@ void CollisionShape2D::SetTrigger(bool trigger)
 
     if (fixture_)
         fixture_->SetSensor(trigger);
-    
+
     MarkNetworkUpdate();
 }
 
@@ -96,11 +96,11 @@ void CollisionShape2D::SetCategoryBits(int categoryBits)
     if (fixtureDef_.filter.categoryBits == categoryBits)
         return;
 
-    fixtureDef_.filter.categoryBits = categoryBits;
+    fixtureDef_.filter.categoryBits = (uint16)categoryBits;
 
     if (fixture_)
         fixture_->SetFilterData(fixtureDef_.filter);
-    
+
     MarkNetworkUpdate();
 }
 
@@ -109,7 +109,7 @@ void CollisionShape2D::SetMaskBits(int maskBits)
     if (fixtureDef_.filter.maskBits == maskBits)
         return;
 
-    fixtureDef_.filter.maskBits = maskBits;
+    fixtureDef_.filter.maskBits = (uint16)maskBits;
 
     if (fixture_)
         fixture_->SetFilterData(fixtureDef_.filter);
@@ -122,7 +122,7 @@ void CollisionShape2D::SetGroupIndex(int groupIndex)
     if (fixtureDef_.filter.groupIndex == groupIndex)
         return;
 
-    fixtureDef_.filter.groupIndex = groupIndex;
+    fixtureDef_.filter.groupIndex = (int16)groupIndex;
 
     if (fixture_)
         fixture_->SetFilterData(fixtureDef_.filter);
@@ -210,14 +210,26 @@ void CollisionShape2D::CreateFixture()
         return;
 
     if (!rigidBody_)
-        return;
+    {
+        rigidBody_ = node_->GetComponent<RigidBody2D>(); // RigidBody2D can be created after CollisionShape2D
+        if (!rigidBody_)
+            return;
+    }
 
     b2Body* body = rigidBody_->GetBody();
     if (!body)
         return;
 
-    fixture_ = body->CreateFixture(&fixtureDef_);
-    fixture_->SetUserData(this);
+    // Chain shape must have atleast two vertices before creating fixture
+    if (fixtureDef_.shape->m_type != b2Shape::e_chain || static_cast<const b2ChainShape*>(fixtureDef_.shape)->m_count >= 2)
+    {
+        b2MassData massData;
+        body->GetMassData(&massData);
+        fixture_ = body->CreateFixture(&fixtureDef_);
+        if (!rigidBody_->GetUseFixtureMass()) // Workaround for resetting mass in CreateFixture().
+            body->SetMassData(&massData);
+        fixture_->SetUserData(this);
+    }
 }
 
 void CollisionShape2D::ReleaseFixture()
@@ -232,8 +244,12 @@ void CollisionShape2D::ReleaseFixture()
     if (!body)
         return;
 
+    b2MassData massData;
+    body->GetMassData(&massData);
     body->DestroyFixture(fixture_);
-    fixture_ = 0;
+    if (!rigidBody_->GetUseFixtureMass()) // Workaround for resetting mass in DestroyFixture().
+        body->SetMassData(&massData);
+    fixture_ = nullptr;
 }
 
 float CollisionShape2D::GetMass() const
@@ -262,7 +278,7 @@ Vector2 CollisionShape2D::GetMassCenter() const
 {
     if (!fixture_)
         return Vector2::ZERO;
-    
+
     b2MassData massData;
     fixture_->GetMassData(&massData);
 
@@ -282,14 +298,13 @@ void CollisionShape2D::OnNodeSet(Node* node)
             CreateFixture();
             rigidBody_->AddCollisionShape2D(this);
         }
-        else
-            LOGERROR("No right body component in node, can not create collision shape");
     }
 }
 
 void CollisionShape2D::OnMarkedDirty(Node* node)
 {
-    Vector3 newWorldScale = node_->GetWorldScale();
+    // Use signed world scale to allow flipping of sprites by negative scale to work properly in regard to the collision shape
+    Vector3 newWorldScale = node_->GetSignedWorldScale();
 
     Vector3 delta = newWorldScale - cachedWorldScale_;
     if (delta.DotProduct(delta) < 0.01f)
@@ -302,11 +317,10 @@ void CollisionShape2D::OnMarkedDirty(Node* node)
         scene->DelayedMarkedDirty(this);
         return;
     }
-    
+
     cachedWorldScale_ = newWorldScale;
 
-    if (fixture_)
-        ApplyNodeWorldScale();
+    ApplyNodeWorldScale();
 }
 
 }

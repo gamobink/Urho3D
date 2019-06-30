@@ -14,19 +14,25 @@
 #include "Scripts/Editor/EditorSecondaryToolbar.as"
 #include "Scripts/Editor/EditorUI.as"
 #include "Scripts/Editor/EditorImport.as"
+#include "Scripts/Editor/EditorExport.as"
 #include "Scripts/Editor/EditorResourceBrowser.as"
 #include "Scripts/Editor/EditorSpawn.as"
 #include "Scripts/Editor/EditorSoundType.as"
+#include "Scripts/Editor/EditorTerrain.as"
+#include "Scripts/Editor/EditorLayers.as"
+#include "Scripts/Editor/EditorColorWheel.as"
+#include "Scripts/Editor/EditorEventsHandlers.as"
+#include "Scripts/Editor/EditorViewDebugIcons.as"
+#include "Scripts/Editor/EditorViewSelectableOrigins.as"
+#include "Scripts/Editor/EditorViewPaintSelection.as"
 
 String configFileName;
-
-bool instancingSetting = true;
-int shadowQualitySetting = 2;
 
 void Start()
 {
     // Assign the value ASAP because configFileName is needed on exit, including exit on error
     configFileName = fileSystem.GetAppPreferencesDir("urho3d", "Editor") + "Config.xml";
+    localization.LoadJSONFile("EditorStrings.json");
 
     if (engine.headless)
     {
@@ -42,6 +48,9 @@ void Start()
 
     // Disable Editor auto exit, check first if it is OK to exit
     engine.autoExit = false;
+    // Pause completely when minimized to save OS resources, reduce defocused framerate
+    engine.pauseMinimized = true;
+    engine.maxInactiveFps = 10;
     // Enable console commands from the editor script
     script.defaultScriptFile = scriptFile;
     // Enable automatic resource reloading
@@ -50,6 +59,17 @@ void Start()
     cache.returnFailedResources = true;
     // Use OS mouse without grabbing it
     input.mouseVisible = true;
+    // If input is scaled the double the UI size (High DPI display)
+    if (input.inputScale != Vector2::ONE)
+    {
+        // Should we use the inputScale itself to scale UI?
+        ui.scale = 2;
+        // When UI scale is increased, also set the UI atlas to nearest filtering to avoid artifacts
+        // (there is no padding) and to have a sharper look
+        Texture2D@ uiTex = cache.GetResource("Texture2D", "Textures/UI.png");
+        if (uiTex !is null)
+            uiTex.filterMode = FILTER_NEAREST;
+    }
     // Use system clipboard to allow transport of text in & out from the editor
     ui.useSystemClipboard = true;
 }
@@ -68,8 +88,9 @@ void FirstFrame()
     ParseArguments();
     // Switch to real frame handler after initialization
     SubscribeToEvent("Update", "HandleUpdate");
-    SubscribeToEvent("ReloadFinished", "HandleReloadFinished");
-    SubscribeToEvent("ReloadFailed", "HandleReloadFailed");
+    SubscribeToEvent("ReloadFinished", "HandleReloadFinishOrFail");
+    SubscribeToEvent("ReloadFailed", "HandleReloadFinishOrFail");
+    EditorSubscribeToEvents();
 }
 
 void Stop()
@@ -93,6 +114,14 @@ void ParseArguments()
                 break;
             }
         }
+        if (arguments[i].ToLower() == "-language")
+        {
+            if (++i < arguments.length)
+            {
+                localization.SetLanguage(arguments[i]);
+                break;
+            }
+        }
     }
 
     if (!loaded)
@@ -111,7 +140,10 @@ void HandleUpdate(StringHash eventType, VariantMap& eventData)
     UpdateTestAnimation(timeStep);
     UpdateGizmo();
     UpdateDirtyUI();
-
+    UpdateViewDebugIcons();
+    UpdateOrigins();
+    UpdatePaintSelection();
+    
     // Handle Particle Editor looping.
     if (particleEffectWindow !is null and particleEffectWindow.visible)
     {
@@ -132,14 +164,12 @@ void HandleUpdate(StringHash eventType, VariantMap& eventData)
     }
 }
 
-void HandleReloadFinished(StringHash eventType, VariantMap& eventData)
+void HandleReloadFinishOrFail(StringHash eventType, VariantMap& eventData)
 {
-    attributesFullDirty = true;
-}
-
-void HandleReloadFailed(StringHash eventType, VariantMap& eventData)
-{
-    attributesFullDirty = true;
+    Resource@ res = cast<Resource>(GetEventSender());
+    // Only refresh inspector when reloading scripts (script attributes may change)
+    if (res !is null && (res.typeName == "ScriptFile" || res.typeName == "LuaFile"))
+        attributesFullDirty = true;
 }
 
 void LoadConfig()
@@ -165,7 +195,9 @@ void LoadConfig()
     XMLElement consoleElem = configElem.GetChild("console");
     XMLElement varNamesElem = configElem.GetChild("varnames");
     XMLElement soundTypesElem = configElem.GetChild("soundtypes");
-
+    XMLElement cubeMapElem = configElem.GetChild("cubegen");
+    XMLElement defaultTagsElem = configElem.GetChild("tags");
+    
     if (!cameraElem.isNull)
     {
         if (cameraElem.HasAttribute("nearclip")) viewNearClip = cameraElem.GetFloat("nearclip");
@@ -173,15 +205,19 @@ void LoadConfig()
         if (cameraElem.HasAttribute("fov")) viewFov = cameraElem.GetFloat("fov");
         if (cameraElem.HasAttribute("speed")) cameraBaseSpeed = cameraElem.GetFloat("speed");
         if (cameraElem.HasAttribute("limitrotation")) limitRotation = cameraElem.GetBool("limitrotation");
-        if (cameraElem.HasAttribute("mousewheelcameraposition")) mouseWheelCameraPosition = cameraElem.GetBool("mousewheelcameraposition");
         if (cameraElem.HasAttribute("viewportmode")) viewportMode = cameraElem.GetUInt("viewportmode");
         if (cameraElem.HasAttribute("mouseorbitmode")) mouseOrbitMode = cameraElem.GetInt("mouseorbitmode");
+        if (cameraElem.HasAttribute("mmbpan")) mmbPanMode = cameraElem.GetBool("mmbpan");
+        if (cameraElem.HasAttribute("rotatearoundselect")) rotateAroundSelect = cameraElem.GetBool("rotatearoundselect");
+        
         UpdateViewParameters();
     }
 
     if (!objectElem.isNull)
     {
-        if (objectElem.HasAttribute("newnodedistance")) newNodeDistance = objectElem.GetFloat("newnodedistance");
+        if (objectElem.HasAttribute("cameraflymode")) cameraFlyMode = objectElem.GetBool("cameraflymode");
+        if (objectElem.HasAttribute("hotkeymode")) hotKeyMode = objectElem.GetInt("hotkeymode");
+        if (objectElem.HasAttribute("newnodemode")) newNodeMode = objectElem.GetInt("newnodemode");
         if (objectElem.HasAttribute("movestep")) moveStep = objectElem.GetFloat("movestep");
         if (objectElem.HasAttribute("rotatestep")) rotateStep = objectElem.GetFloat("rotatestep");
         if (objectElem.HasAttribute("scalestep")) scaleStep = objectElem.GetFloat("scalestep");
@@ -222,17 +258,20 @@ void LoadConfig()
         if (renderingElem.HasAttribute("texturequality")) renderer.textureQuality = renderingElem.GetInt("texturequality");
         if (renderingElem.HasAttribute("materialquality")) renderer.materialQuality = renderingElem.GetInt("materialquality");
         if (renderingElem.HasAttribute("shadowresolution")) SetShadowResolution(renderingElem.GetInt("shadowresolution"));
-        if (renderingElem.HasAttribute("shadowquality")) renderer.shadowQuality = shadowQualitySetting = renderingElem.GetInt("shadowquality");
+        if (renderingElem.HasAttribute("shadowquality")) renderer.shadowQuality = ShadowQuality(renderingElem.GetInt("shadowquality"));
         if (renderingElem.HasAttribute("maxoccludertriangles")) renderer.maxOccluderTriangles = renderingElem.GetInt("maxoccludertriangles");
         if (renderingElem.HasAttribute("specularlighting")) renderer.specularLighting = renderingElem.GetBool("specularlighting");
-        if (renderingElem.HasAttribute("dynamicinstancing")) renderer.dynamicInstancing = instancingSetting = renderingElem.GetBool("dynamicinstancing");
+        if (renderingElem.HasAttribute("dynamicinstancing")) renderer.dynamicInstancing = renderingElem.GetBool("dynamicinstancing");
         if (renderingElem.HasAttribute("framelimiter")) engine.maxFps = renderingElem.GetBool("framelimiter") ? 200 : 0;
+        if (renderingElem.HasAttribute("gammacorrection")) gammaCorrection = renderingElem.GetBool("gammacorrection");
+        if (renderingElem.HasAttribute("hdr")) HDR = renderingElem.GetBool("hdr");
     }
 
     if (!uiElem.isNull)
     {
         if (uiElem.HasAttribute("minopacity")) uiMinOpacity = uiElem.GetFloat("minopacity");
         if (uiElem.HasAttribute("maxopacity")) uiMaxOpacity = uiElem.GetFloat("maxopacity");
+        if (uiElem.HasAttribute("languageindex")) localization.SetLanguage(uiElem.GetInt("languageindex"));
     }
 
     if (!hierarchyElem.isNull)
@@ -278,6 +317,23 @@ void LoadConfig()
     if (!soundTypesElem.isNull)
         LoadSoundTypes(soundTypesElem);
 
+    if (!cubeMapElem.isNull)
+    {
+        cubeMapGen_Name = cubeMapElem.HasAttribute("name") ? cubeMapElem.GetAttribute("name") : "";
+        cubeMapGen_Path = cubeMapElem.HasAttribute("path") ? cubeMapElem.GetAttribute("path") : cubemapDefaultOutputPath;
+        cubeMapGen_Size = cubeMapElem.HasAttribute("size") ? cubeMapElem.GetInt("size") : 128;
+    }
+    else
+    {
+        cubeMapGen_Name = "";
+        cubeMapGen_Path = cubemapDefaultOutputPath;
+        cubeMapGen_Size = 128;
+    }
+    
+    if (!defaultTagsElem.isNull)
+    {
+        if (defaultTagsElem.HasAttribute("tags")) defaultTags = defaultTagsElem.GetAttribute("tags");
+    }
 }
 
 void SaveConfig()
@@ -295,17 +351,22 @@ void SaveConfig()
     XMLElement consoleElem = configElem.CreateChild("console");
     XMLElement varNamesElem = configElem.CreateChild("varnames");
     XMLElement soundTypesElem = configElem.CreateChild("soundtypes");
+    XMLElement cubeGenElem = configElem.CreateChild("cubegen");
+    XMLElement defaultTagsElem = configElem.CreateChild("tags");
 
     cameraElem.SetFloat("nearclip", viewNearClip);
     cameraElem.SetFloat("farclip", viewFarClip);
     cameraElem.SetFloat("fov", viewFov);
     cameraElem.SetFloat("speed", cameraBaseSpeed);
     cameraElem.SetBool("limitrotation", limitRotation);
-    cameraElem.SetBool("mousewheelcameraposition", mouseWheelCameraPosition);
     cameraElem.SetUInt("viewportmode", viewportMode);
     cameraElem.SetInt("mouseorbitmode", mouseOrbitMode);
+    cameraElem.SetBool("mmbpan", mmbPanMode);
+    cameraElem.SetBool("rotatearoundselect", rotateAroundSelect);
 
-    objectElem.SetFloat("newnodedistance", newNodeDistance);
+    objectElem.SetBool("cameraflymode", cameraFlyMode);
+    objectElem.SetInt("hotkeymode", hotKeyMode);
+    objectElem.SetInt("newnodemode", newNodeMode);
     objectElem.SetFloat("movestep", moveStep);
     objectElem.SetFloat("rotatestep", rotateStep);
     objectElem.SetFloat("scalestep", scaleStep);
@@ -331,15 +392,17 @@ void SaveConfig()
         renderingElem.SetInt("shadowresolution", GetShadowResolution());
         renderingElem.SetInt("maxoccludertriangles", renderer.maxOccluderTriangles);
         renderingElem.SetBool("specularlighting", renderer.specularLighting);
-        // If Shader Model 3 is not supported, save the remembered instancing & quality settings instead of reduced settings
-        renderingElem.SetInt("shadowquality", graphics.sm3Support ? renderer.shadowQuality : shadowQualitySetting);
-        renderingElem.SetBool("dynamicinstancing", graphics.sm3Support ? renderer.dynamicInstancing : instancingSetting);
+        renderingElem.SetInt("shadowquality", int(renderer.shadowQuality));
+        renderingElem.SetBool("dynamicinstancing", renderer.dynamicInstancing);
     }
 
     renderingElem.SetBool("framelimiter", engine.maxFps > 0);
+    renderingElem.SetBool("gammacorrection", gammaCorrection);
+    renderingElem.SetBool("hdr", HDR);
 
     uiElem.SetFloat("minopacity", uiMinOpacity);
     uiElem.SetFloat("maxopacity", uiMaxOpacity);
+    uiElem.SetInt("languageindex", localization.languageIndex);
 
     hierarchyElem.SetBool("showinternaluielement", showInternalUIElement);
     hierarchyElem.SetBool("showtemporaryobject", showTemporaryObject);
@@ -366,7 +429,13 @@ void SaveConfig()
     consoleElem.SetAttribute("commandinterpreter", console.commandInterpreter);
 
     varNamesElem.SetVariantMap(globalVarNames);
+    
+    cubeGenElem.SetAttribute("name", cubeMapGen_Name);
+    cubeGenElem.SetAttribute("path", cubeMapGen_Path);
+    cubeGenElem.SetAttribute("size", cubeMapGen_Size);
 
+    defaultTagsElem.SetAttribute("tags", defaultTags);
+    
     SaveSoundTypes(soundTypesElem);
 
     config.Save(File(configFileName, FILE_WRITE));

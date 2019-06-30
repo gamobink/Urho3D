@@ -6,7 +6,7 @@
 require "LuaScripts/Utilities/Sample"
 
 -- Identifier for the chat network messages
-local MSG_CHAT = 32
+local MSG_CHAT = 153
 -- UDP port we will use
 local CHAT_SERVER_PORT = 2345
 
@@ -28,6 +28,9 @@ function Start()
 
     -- Create the user interface
     CreateUI()
+
+    -- Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_FREE)
 
     -- Subscribe to UI and network events
     SubscribeToEvents()
@@ -59,7 +62,7 @@ function CreateUI()
 
     UpdateButtons()
 
-    local size = (graphics.height - 20) / chatHistoryText.rowHeight
+    local size = (graphics.height - 100) / chatHistoryText.rowHeight
     for i = 1, size do
         table.insert(chatHistory, "")
     end
@@ -125,7 +128,7 @@ function UpdateButtons()
 end
 
 function HandleLogMessage(eventType, eventData)
-    ShowChatText(eventData:GetString("Message"))
+    ShowChatText(eventData["Message"]:GetString())
 end
 
 function HandleSend(eventType, eventData)
@@ -185,14 +188,14 @@ function HandleStartServer(eventType, eventData)
 end
 
 function HandleNetworkMessage(eventType, eventData)
-    local msgID = eventData:GetInt("MessageID")
+    local msgID = eventData["MessageID"]:GetInt()
     if msgID == MSG_CHAT then
-        local msg = eventData:GetBuffer("Data")
+        local msg = eventData["Data"]:GetBuffer()
         local text = msg:ReadString()
         -- If we are the server, prepend the sender's IP address and port and echo to everyone
         -- If we are a client, just display the message
         if network.serverRunning then
-            local sender = eventData:GetPtr("Connection", "Connection")
+            local sender = eventData["Connection"]:GetPtr("Connection")
             text = sender:ToString() .. " " .. text
             local sendMsg = VectorBuffer()
             sendMsg:WriteString(text)

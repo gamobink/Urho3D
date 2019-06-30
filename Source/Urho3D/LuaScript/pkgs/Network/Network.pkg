@@ -20,6 +20,8 @@ class Network
     void BroadcastRemoteEvent(Node* node, const String eventType, bool inOrder, const VariantMap& eventData = Variant::emptyVariantMap);
     
     void SetUpdateFps(int fps);
+    void SetSimulatedLatency(int ms);
+    void SetSimulatedPacketLoss(float loss);
     
     void RegisterRemoteEvent(StringHash eventType);
     void RegisterRemoteEvent(const String eventType);
@@ -35,14 +37,26 @@ class Network
     tolua_outside HttpRequest* NetworkMakeHttpRequest @ MakeHttpRequest(const String url, const String verb = String::EMPTY, const Vector<String>& headers = Vector<String>(), const String postData = String::EMPTY);
     
     int GetUpdateFps() const;
+    int GetSimulatedLatency() const;
+    float GetSimulatedPacketLoss() const;
     Connection* GetServerConnection() const;
     
     bool IsServerRunning() const;
     
     bool CheckRemoteEvent(StringHash eventType) const;
     const String GetPackageCacheDir() const;
+
+    void StartNATClient();
+    const String& GetGUID() const;
+    void DiscoverHosts(unsigned port);
+    void SetPassword(const String& password);
+    void SetDiscoveryBeacon(const VariantMap& data);
+    void SetNATServerInfo(const String& address, unsigned short port);
+    void AttemptNATPunchtrough(const String& guid, Scene* scene, const VariantMap& identity = Variant::emptyVariantMap);
     
     tolua_property__get_set int updateFps;
+    tolua_property__get_set int simulatedLatency;
+    tolua_property__get_set float simulatedPacketLoss;
     tolua_readonly tolua_property__get_set Connection* serverConnection;
     tolua_readonly tolua_property__is_set bool serverRunning;
     tolua_property__get_set String packageCacheDir;
@@ -66,10 +80,6 @@ static HttpRequest* NetworkMakeHttpRequest(Network* network, const String& url, 
     if (!network)
         return 0;
 
-    SharedPtr<HttpRequest> httpRequestPtr = network->MakeHttpRequest(url, verb, headers, postData);
-    HttpRequest* httpRequest = httpRequestPtr.Get();
-    httpRequestPtr.Detach();
-
-    return httpRequest;
+    return network->MakeHttpRequest(url, verb, headers, postData).Detach();
 }
 $}

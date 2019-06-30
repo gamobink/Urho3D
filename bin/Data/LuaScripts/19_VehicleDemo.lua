@@ -20,7 +20,6 @@ local MAX_WHEEL_ANGLE = 22.5
 local vehicleNode = nil
 
 function Start()
-
     -- Execute the common startup for samples
     SampleStart()
 
@@ -32,6 +31,9 @@ function Start()
 
     -- Create the UI content
     CreateInstructions()
+
+    -- Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_RELATIVE)
 
     -- Subscribe to necessary events
     SubscribeToEvents()
@@ -218,7 +220,7 @@ function HandlePostUpdate(eventType, eventData)
     -- Raycast camera against static objects (physics collision mask 2)
     -- and move it closer to the vehicle if something in between
     local cameraRay = Ray(cameraStartPos, (cameraTargetPos - cameraStartPos):Normalized())
-    local cameraRayLength = (cameraTargetPos - cameraStartPos):Length();
+    local cameraRayLength = (cameraTargetPos - cameraStartPos):Length()
     local physicsWorld = scene_:GetComponent("PhysicsWorld")
     local result = physicsWorld:RaycastSingle(cameraRay, cameraRayLength, 2)
     if result.body ~= nil then

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,36 +35,38 @@ class AnimationState;
 /// Animated model component.
 class URHO3D_API AnimatedModel : public StaticModel
 {
-    OBJECT(AnimatedModel);
+    URHO3D_OBJECT(AnimatedModel, StaticModel);
 
     friend class AnimationState;
 
 public:
     /// Construct.
-    AnimatedModel(Context* context);
+    explicit AnimatedModel(Context* context);
     /// Destruct.
-    virtual ~AnimatedModel();
+    ~AnimatedModel() override;
     /// Register object factory. Drawable must be registered first.
     static void RegisterObject(Context* context);
 
     /// Load from binary data. Return true if successful.
-    virtual bool Load(Deserializer& source, bool setInstanceDefault = false);
+    bool Load(Deserializer& source) override;
     /// Load from XML data. Return true if successful.
-    virtual bool LoadXML(const XMLElement& source, bool setInstanceDefault = false);
+    bool LoadXML(const XMLElement& source) override;
+    /// Load from JSON data. Return true if successful.
+    bool LoadJSON(const JSONValue& source) override;
     /// Apply attribute changes that can not be applied immediately. Called after scene load or a network update.
-    virtual void ApplyAttributes();
+    void ApplyAttributes() override;
     /// Process octree raycast. May be called from a worker thread.
-    virtual void ProcessRayQuery(const RayOctreeQuery& query, PODVector<RayQueryResult>& results);
+    void ProcessRayQuery(const RayOctreeQuery& query, PODVector<RayQueryResult>& results) override;
     /// Update before octree reinsertion. Is called from a worker thread.
-    virtual void Update(const FrameInfo& frame);
+    void Update(const FrameInfo& frame) override;
     /// Calculate distance and prepare batches for rendering. May be called from worker thread(s), possibly re-entrantly.
-    virtual void UpdateBatches(const FrameInfo& frame);
+    void UpdateBatches(const FrameInfo& frame) override;
     /// Prepare geometry for rendering. Called from a worker thread if possible (no GPU update.)
-    virtual void UpdateGeometry(const FrameInfo& frame);
+    void UpdateGeometry(const FrameInfo& frame) override;
     /// Return whether a geometry update is necessary, and if it can happen in a worker thread.
-    virtual UpdateGeometryType GetUpdateGeometryType();
+    UpdateGeometryType GetUpdateGeometryType() override;
     /// Visualize the component as debug geometry.
-    virtual void DrawDebugGeometry(DebugRenderer* debug, bool depthTest);
+    void DrawDebugGeometry(DebugRenderer* debug, bool depthTest) override;
 
     /// Set model.
     void SetModel(Model* model, bool createBones = true);
@@ -94,37 +96,49 @@ public:
     void SetMorphWeight(StringHash nameHash, float weight);
     /// Reset all vertex morphs to zero.
     void ResetMorphWeights();
+    /// Apply all animation states to nodes.
+    void ApplyAnimation();
 
     /// Return skeleton.
     Skeleton& GetSkeleton() { return skeleton_; }
+
     /// Return all animation states.
     const Vector<SharedPtr<AnimationState> >& GetAnimationStates() const { return animationStates_; }
+
     /// Return number of animation states.
     unsigned GetNumAnimationStates() const { return animationStates_.Size(); }
+
     /// Return animation state by animation pointer.
     AnimationState* GetAnimationState(Animation* animation) const;
     /// Return animation state by animation name.
     AnimationState* GetAnimationState(const String& animationName) const;
     /// Return animation state by animation name hash.
-    AnimationState* GetAnimationState(const StringHash animationNameHash) const;
+    AnimationState* GetAnimationState(StringHash animationNameHash) const;
     /// Return animation state by index.
     AnimationState* GetAnimationState(unsigned index) const;
+
     /// Return animation LOD bias.
     float GetAnimationLodBias() const { return animationLodBias_; }
+
     /// Return whether to update animation when not visible.
     bool GetUpdateInvisible() const { return updateInvisible_; }
+
     /// Return all vertex morphs.
     const Vector<ModelMorph>& GetMorphs() const { return morphs_; }
+
     /// Return all morph vertex buffers.
     const Vector<SharedPtr<VertexBuffer> >& GetMorphVertexBuffers() const { return morphVertexBuffers_; }
+
     /// Return number of vertex morphs.
     unsigned GetNumMorphs() const { return morphs_.Size(); }
+
     /// Return vertex morph weight by index.
     float GetMorphWeight(unsigned index) const;
     /// Return vertex morph weight by name.
     float GetMorphWeight(const String& name) const;
     /// Return vertex morph weight by name hash.
     float GetMorphWeight(StringHash nameHash) const;
+
     /// Return whether is the master (first) animated model.
     bool IsMaster() const { return isMaster_; }
 
@@ -144,22 +158,29 @@ public:
     VariantVector GetAnimationStatesAttr() const;
     /// Return morphs attribute.
     const PODVector<unsigned char>& GetMorphsAttr() const;
+
     /// Return per-geometry bone mappings.
     const Vector<PODVector<unsigned> >& GetGeometryBoneMappings() const { return geometryBoneMappings_; }
+
     /// Return per-geometry skin matrices. If empty, uses global skinning
     const Vector<PODVector<Matrix3x4> >& GetGeometrySkinMatrices() const { return geometrySkinMatrices_; }
 
+    /// Recalculate the bone bounding box. Normally called internally, but can also be manually called if up-to-date information before rendering is necessary.
+    void UpdateBoneBoundingBox();
+
 protected:
     /// Handle node being assigned.
-    virtual void OnNodeSet(Node* node);
+    void OnNodeSet(Node* node) override;
     /// Handle node transform being dirtied.
-    virtual void OnMarkedDirty(Node* node);
+    void OnMarkedDirty(Node* node) override;
     /// Recalculate the world-space bounding box.
-    virtual void OnWorldBoundingBoxUpdate();
+    void OnWorldBoundingBoxUpdate() override;
 
 private:
     /// Assign skeleton and animation bone node references as a postprocess. Called by ApplyAttributes.
     void AssignBoneNodes();
+    /// Finalize master model bone bounding boxes by merging from matching non-master bones.. Performed whenever any of the AnimatedModels in the same node changes its model.
+    void FinalizeBoneBoundingBoxes();
     /// Remove (old) skeleton root bone.
     void RemoveRootBone();
     /// Mark animation and skinning to require an update.
@@ -175,17 +196,16 @@ private:
     /// Clone geometries for vertex morphing.
     void CloneGeometries();
     /// Copy morph vertices.
-    void CopyMorphVertices(void* dest, void* src, unsigned vertexCount, VertexBuffer* clone, VertexBuffer* original);
+    void CopyMorphVertices(void* destVertexData, void* srcVertexData, unsigned vertexCount, VertexBuffer* destBuffer, VertexBuffer* srcBuffer);
     /// Recalculate animations. Called from Update().
     void UpdateAnimation(const FrameInfo& frame);
-    /// Recalculate the bone bounding box.
-    void UpdateBoneBoundingBox();
     /// Recalculate skinning.
     void UpdateSkinning();
     /// Reapply all vertex morphs.
     void UpdateMorphs();
     /// Apply a vertex morph.
-    void ApplyMorph(VertexBuffer* buffer, void* destVertexData, unsigned morphRangeStart, const VertexBufferMorph& morph, float weight);
+    void ApplyMorph
+        (VertexBuffer* buffer, void* destVertexData, unsigned morphRangeStart, const VertexBufferMorph& morph, float weight);
     /// Handle model reload finished.
     void HandleModelReloadFinished(StringHash eventType, VariantMap& eventData);
 
@@ -212,7 +232,7 @@ private:
     /// The frame number animation LOD distance was last calculated on.
     unsigned animationLodFrameNumber_;
     /// Morph vertex element mask.
-    unsigned morphElementMask_;
+    VertexMaskFlags morphElementMask_;
     /// Animation LOD bias.
     float animationLodBias_;
     /// Animation LOD timer.
@@ -237,6 +257,8 @@ private:
     bool loading_;
     /// Bone nodes assignment pending flag.
     bool assignBonesPending_;
+    /// Force animation update after becoming visible flag.
+    bool forceAnimationUpdate_;
 };
 
 }

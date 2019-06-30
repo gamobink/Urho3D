@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,11 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Mutex.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -33,7 +35,8 @@
 namespace Urho3D
 {
 
-#ifdef WIN32
+#ifdef _WIN32
+
 Mutex::Mutex() :
     handle_(new CRITICAL_SECTION)
 {
@@ -45,7 +48,7 @@ Mutex::~Mutex()
     CRITICAL_SECTION* cs = (CRITICAL_SECTION*)handle_;
     DeleteCriticalSection(cs);
     delete cs;
-    handle_ = 0;
+    handle_ = nullptr;
 }
 
 void Mutex::Acquire()
@@ -53,15 +56,22 @@ void Mutex::Acquire()
     EnterCriticalSection((CRITICAL_SECTION*)handle_);
 }
 
+bool Mutex::TryAcquire()
+{
+    return TryEnterCriticalSection((CRITICAL_SECTION*)handle_) != FALSE;
+}
+
 void Mutex::Release()
 {
     LeaveCriticalSection((CRITICAL_SECTION*)handle_);
 }
+
 #else
+
 Mutex::Mutex() :
     handle_(new pthread_mutex_t)
 {
-    pthread_mutex_t* mutex = (pthread_mutex_t*)handle_;
+    auto* mutex = (pthread_mutex_t*)handle_;
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
@@ -70,10 +80,10 @@ Mutex::Mutex() :
 
 Mutex::~Mutex()
 {
-    pthread_mutex_t* mutex = (pthread_mutex_t*)handle_;
+    auto* mutex = (pthread_mutex_t*)handle_;
     pthread_mutex_destroy(mutex);
     delete mutex;
-    handle_ = 0;
+    handle_ = nullptr;
 }
 
 void Mutex::Acquire()
@@ -81,10 +91,16 @@ void Mutex::Acquire()
     pthread_mutex_lock((pthread_mutex_t*)handle_);
 }
 
+bool Mutex::TryAcquire()
+{
+    return pthread_mutex_trylock((pthread_mutex_t*)handle_) == 0;
+}
+
 void Mutex::Release()
 {
     pthread_mutex_unlock((pthread_mutex_t*)handle_);
 }
+
 #endif
 
 MutexLock::MutexLock(Mutex& mutex) :

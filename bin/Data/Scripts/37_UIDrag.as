@@ -2,7 +2,8 @@
 // This sample demonstrates:
 //     - Creating GUI elements from AngelScript
 //     - Loading GUI Style from xml
-//     - Subscribing to GUI drag events and handling them.
+//     - Subscribing to GUI drag events and handling them
+//     - Working with GUI elements with specific tags.
 
 #include "Scripts/Utilities/Sample.as"
 StringHash VAR_BUTTONS("BUTTONS");
@@ -18,10 +19,13 @@ void Start()
     String platform = GetPlatform();
     if (platform != "Android" and platform != "iOS")
         input.mouseVisible = true;
-    
+
     // Create the UI content
     CreateGUI();
     CreateInstructions();
+
+    // Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_FREE);
 
     // Hook up to the frame update events
     SubscribeToEvents();
@@ -37,50 +41,37 @@ void CreateGUI()
     {
         Button@ b = Button();
         root.AddChild(b);
-        // Reference a style from the style sheet loaded earlier:
-        b.style = "Button";
-        b.size = IntVector2(300, 100);
+        b.SetStyleAuto();
+        b.minWidth = 250;
         b.position = IntVector2(50*i, 50*i);
 
+        // Enable the bring-to-front flag and set the initial priority
+        b.bringToFront = true;
+        b.priority = i;
+
+        // Set the layout mode to make the child text elements aligned vertically
+        b.SetLayout(LM_VERTICAL, 20, IntRect(40, 40, 40, 40));
+        Array<String> dragInfos = {"Num Touch", "Text", "Event Touch"};
+        for (uint j = 0; j < dragInfos.length; ++j)
+            b.CreateChild("Text", dragInfos[j]).SetStyleAuto();
+
+        if (i % 2 == 0)
+            b.AddTag("SomeTag");
+
+        SubscribeToEvent(b, "Click", "HandleClick");
         SubscribeToEvent(b, "DragMove", "HandleDragMove");
         SubscribeToEvent(b, "DragBegin", "HandleDragBegin");
         SubscribeToEvent(b, "DragCancel", "HandleDragCancel");
-
-        {
-            Text@ t = Text();
-            b.AddChild(t);
-            t.style = "Text";
-            t.horizontalAlignment = HA_CENTER;
-            t.verticalAlignment = VA_CENTER;
-            t.name = "Text";
-        }
-
-        {
-            Text@ t = Text();
-            b.AddChild(t);
-            t.style = "Text";
-            t.name = "Event Touch";
-            t.horizontalAlignment = HA_CENTER;
-            t.verticalAlignment = VA_BOTTOM;
-        }
-
-        {
-            Text@ t = Text();
-            b.AddChild(t);
-            t.style ="Text";
-            t.name = "Num Touch";
-            t.horizontalAlignment = HA_CENTER;
-            t.verticalAlignment = VA_TOP;
-        }
     }
 
     for (int i = 0; i < 10; i++)
     {
         Text@ t = Text();
         root.AddChild(t);
-        t.style = "Text";
+        t.SetStyleAuto();
         t.name = "Touch "+ String(i);
         t.visible = false;
+        t.priority = 100;   // Make sure it has higher priority than the buttons
     }
 }
 
@@ -88,8 +79,11 @@ void CreateInstructions()
 {
     // Construct new Text object, set string to display and font to use
     Text@ instructionText = ui.root.CreateChild("Text");
-    instructionText.text = "Drag on the buttons to move them around.\nMulti- button drag also supported.";
+    instructionText.text = "Drag on the buttons to move them around.\n" +
+                           "Touch input allows also multi-drag.\n" +
+                           "Press SPACE to show/hide tagged UI elements.";
     instructionText.SetFont(cache.GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15);
+    instructionText.textAlignment = HA_CENTER;
 
     // Position the text relative to the screen center
     instructionText.horizontalAlignment = HA_CENTER;
@@ -101,6 +95,12 @@ void SubscribeToEvents()
 {
     // Subscribe HandleUpdate() function for processing update events
     SubscribeToEvent("Update", "HandleUpdate");
+}
+
+void HandleClick(StringHash eventType, VariantMap& eventData)
+{
+    Button@ element = eventData["Element"].GetPtr();
+    element.BringToFront();
 }
 
 void HandleDragBegin(StringHash eventType, VariantMap& eventData)
@@ -157,7 +157,7 @@ void HandleUpdate(StringHash eventType, VariantMap& eventData)
         Text@ t = root.GetChild("Touch " + String(i));
         TouchState@ ts = input.touches[i];
         t.text = "Touch "+ String(ts.touchID);
-        
+
         IntVector2 pos = ts.position;
         pos.y -= 30;
 
@@ -169,6 +169,13 @@ void HandleUpdate(StringHash eventType, VariantMap& eventData)
     {
         Text@ t = root.GetChild("Touch " + String(i));
         t.visible = false;
+    }
+
+    if (input.keyPress[KEY_SPACE])
+    {
+        Array<UIElement@>@ elements = root.GetChildrenWithTag("SomeTag");
+        for (uint i = 0; i < elements.length; ++i)
+            elements[i].visible = !elements[i].visible;
     }
 }
 

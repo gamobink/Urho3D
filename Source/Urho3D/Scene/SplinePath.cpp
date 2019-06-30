@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,8 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../IO/Log.h"
 #include "../Scene/Scene.h"
@@ -31,6 +33,12 @@ namespace Urho3D
 extern const char* interpolationModeNames[];
 extern const char* LOGIC_CATEGORY;
 
+static const StringVector controlPointsStructureElementNames =
+{
+    "Control Point Count",
+    "   NodeID"
+};
+
 SplinePath::SplinePath(Context* context) :
     Component(context),
     spline_(BEZIER_CURVE),
@@ -39,7 +47,6 @@ SplinePath::SplinePath(Context* context) :
     traveled_(0.f),
     length_(0.f),
     dirty_(false),
-    controlledNode_(NULL),
     controlledIdAttr_(0)
 {
     UpdateNodeIds();
@@ -49,12 +56,15 @@ void SplinePath::RegisterObject(Context* context)
 {
     context->RegisterFactory<SplinePath>(LOGIC_CATEGORY);
 
-    ENUM_ACCESSOR_ATTRIBUTE("Interpolation Mode", GetInterpolationMode, SetInterpolationMode, InterpolationMode, interpolationModeNames, BEZIER_CURVE, AM_FILE);
-    ATTRIBUTE("Speed", float, speed_, 1.f, AM_FILE);
-    ATTRIBUTE("Traveled", float, traveled_, 0.f, AM_FILE | AM_NOEDIT);
-    ATTRIBUTE("Elapsed Time", float, elapsedTime_, 0.f, AM_FILE | AM_NOEDIT);
-    ACCESSOR_ATTRIBUTE("Controlled", GetControlledIdAttr, SetControlledIdAttr, unsigned, 0, AM_FILE | AM_NODEID);
-    ACCESSOR_ATTRIBUTE("Control Points", GetControlPointIdsAttr, SetControlPointIdsAttr, VariantVector, Variant::emptyVariantVector, AM_FILE | AM_NODEIDVECTOR);
+    URHO3D_ENUM_ACCESSOR_ATTRIBUTE("Interpolation Mode", GetInterpolationMode, SetInterpolationMode, InterpolationMode,
+        interpolationModeNames, BEZIER_CURVE, AM_FILE);
+    URHO3D_ATTRIBUTE("Speed", float, speed_, 1.f, AM_FILE);
+    URHO3D_ATTRIBUTE("Traveled", float, traveled_, 0.f, AM_FILE | AM_NOEDIT);
+    URHO3D_ATTRIBUTE("Elapsed Time", float, elapsedTime_, 0.f, AM_FILE | AM_NOEDIT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Controlled", GetControlledIdAttr, SetControlledIdAttr, unsigned, 0, AM_FILE | AM_NODEID);
+    URHO3D_ACCESSOR_ATTRIBUTE("Control Points", GetControlPointIdsAttr, SetControlPointIdsAttr,
+        VariantVector, Variant::emptyVariantVector, AM_FILE | AM_NODEIDVECTOR)
+        .SetMetadata(AttributeMetadata::P_VECTOR_STRUCT_ELEMENTS, controlPointsStructureElementNames);
 }
 
 void SplinePath::ApplyAttributes()
@@ -103,16 +113,16 @@ void SplinePath::ApplyAttributes()
     dirty_ = false;
 }
 
-void SplinePath::DrawDebugGeometry(DebugRenderer* debug, bool depthTest)
+void SplinePath::DrawDebugGeometry(DebugRenderer* debug, bool /*depthTest*/)
 {
     if (debug && node_ && IsEnabledEffective())
     {
         if (spline_.GetKnots().Size() > 1)
         {
             Vector3 a = spline_.GetPoint(0.f).GetVector3();
-            for (float f = 0.01f; f <= 1.0f; f = f + 0.01f)
+            for (auto i = 1; i <= 100; ++i)
             {
-                Vector3 b = spline_.GetPoint(f).GetVector3();
+                Vector3 b = spline_.GetPoint(i / 100.f).GetVector3();
                 debug->AddLine(a, b, Color::GREEN);
                 a = b;
             }
@@ -186,9 +196,9 @@ void SplinePath::SetControlledNode(Node* controlled)
         controlledNode_ = WeakPtr<Node>(controlled);
 }
 
-void SplinePath::SetInterpolationMode(InterpolationMode interpolationMode) 
-{ 
-    spline_.SetInterpolationMode(interpolationMode); 
+void SplinePath::SetInterpolationMode(InterpolationMode interpolationMode)
+{
+    spline_.SetInterpolationMode(interpolationMode);
     CalculateLength();
 }
 
@@ -267,8 +277,8 @@ void SplinePath::SetControlPointIdsAttr(const VariantVector& value)
 void SplinePath::SetControlledIdAttr(unsigned value)
 {
     if (value > 0 && value < M_MAX_UNSIGNED)
-
         controlledIdAttr_ = value;
+
     dirty_ = true;
 }
 
@@ -336,9 +346,9 @@ void SplinePath::CalculateLength()
     length_ = 0.f;
 
     Vector3 a = spline_.GetKnot(0).GetVector3();
-    for (float f = 0.000f; f <= 1.000f; f += 0.001f)
+    for (auto i = 0; i <= 1000; ++i)
     {
-        Vector3 b = spline_.GetPoint(f).GetVector3();
+        Vector3 b = spline_.GetPoint(i / 1000.f).GetVector3();
         length_ += Abs((a - b).Length());
         a = b;
     }

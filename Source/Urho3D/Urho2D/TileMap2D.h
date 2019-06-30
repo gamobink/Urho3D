@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,18 +34,18 @@ class TmxFile2D;
 /// Tile map component.
 class URHO3D_API TileMap2D : public Component
 {
-    OBJECT(TileMap2D);
+    URHO3D_OBJECT(TileMap2D, Component);
 
 public:
     /// Construct.
-    TileMap2D(Context* context);
+    explicit TileMap2D(Context* context);
     /// Destruct.
-    ~TileMap2D();
+    ~TileMap2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Visualize the component as debug geometry.
-    virtual void DrawDebugGeometry(DebugRenderer* debug, bool depthTest);
+    void DrawDebugGeometry(DebugRenderer* debug, bool depthTest) override;
 
     /// Set tmx file.
     void SetTmxFile(TmxFile2D* tmxFile);
@@ -54,10 +54,13 @@ public:
 
     /// Return tmx file.
     TmxFile2D* GetTmxFile() const;
+
     /// Return information.
     const TileMapInfo2D& GetInfo() const { return info_; }
+
     /// Return number of layers.
     unsigned GetNumLayers() const { return layers_.Size(); }
+
     /// Return tile map layer at index.
     TileMapLayer2D* GetLayer(unsigned index) const;
     /// Convert tile index to position.
@@ -69,15 +72,13 @@ public:
     void SetTmxFileAttr(const ResourceRef& value);
     /// Return tile map file attribute.
     ResourceRef GetTmxFileAttr() const;
-
+    ///
+    Vector<SharedPtr<TileMapObject2D> > GetTileCollisionShapes(unsigned gid) const;
 private:
-    /// Handle node being assigned.
-    virtual void OnNodeSet(Node* node);
-
     /// Tmx file.
     SharedPtr<TmxFile2D> tmxFile_;
     /// Tile map information.
-    TileMapInfo2D info_;
+    TileMapInfo2D info_{};
     /// Root node for tile map layer.
     SharedPtr<Node> rootNode_;
     /// Tile map layers.

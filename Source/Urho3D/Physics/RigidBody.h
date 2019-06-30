@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "../Scene/Component.h"
 #include "../IO/VectorBuffer.h"
+#include "../Scene/Component.h"
 
 #include <Bullet/LinearMath/btMotionState.h>
 
@@ -49,28 +49,26 @@ enum CollisionEventMode
 /// Physics rigid body component.
 class URHO3D_API RigidBody : public Component, public btMotionState
 {
-    OBJECT(RigidBody);
+    URHO3D_OBJECT(RigidBody, Component);
 
 public:
     /// Construct.
-    RigidBody(Context* context);
+    explicit RigidBody(Context* context);
     /// Destruct. Free the rigid body and geometries.
-    virtual ~RigidBody();
+    ~RigidBody() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
-    /// Handle attribute write access.
-    virtual void OnSetAttribute(const AttributeInfo& attr, const Variant& src);
     /// Apply attribute changes that can not be applied immediately. Called after scene load or a network update.
-    virtual void ApplyAttributes();
+    void ApplyAttributes() override;
     /// Handle enabled/disabled state change.
-    virtual void OnSetEnabled();
+    void OnSetEnabled() override;
     /// Return initial world transform to Bullet.
-    virtual void getWorldTransform(btTransform &worldTrans) const;
+    void getWorldTransform(btTransform& worldTrans) const override;
     /// Update world transform from Bullet.
-    virtual void setWorldTransform(const btTransform &worldTrans);
+    void setWorldTransform(const btTransform& worldTrans) override;
     /// Visualize the component as debug geometry.
-    virtual void DrawDebugGeometry(DebugRenderer* debug, bool depthTest);
+    void DrawDebugGeometry(DebugRenderer* debug, bool depthTest) override;
 
     /// Set mass. Zero mass makes the body static.
     void SetMass(float mass);
@@ -89,13 +87,13 @@ public:
     /// Set linear velocity damping factor.
     void SetLinearDamping(float damping);
     /// Set angular velocity.
-    void SetAngularVelocity(const Vector3& angularVelocity);
+    void SetAngularVelocity(const Vector3& velocity);
     /// Set angular degrees of freedom. Use 1 to enable an axis or 0 to disable. Default is all axes enabled (1, 1, 1).
     void SetAngularFactor(const Vector3& factor);
     /// Set angular velocity deactivation threshold.
     void SetAngularRestThreshold(float threshold);
     /// Set angular velocity damping factor.
-    void SetAngularDamping(float factor);
+    void SetAngularDamping(float damping);
     /// Set friction coefficient.
     void SetFriction(float friction);
     /// Set anisotropic friction.
@@ -151,12 +149,16 @@ public:
 
     /// Return physics world.
     PhysicsWorld* GetPhysicsWorld() const { return physicsWorld_; }
+
     /// Return Bullet rigid body.
-    btRigidBody* GetBody() const { return body_; }
+    btRigidBody* GetBody() const { return body_.Get(); }
+
     /// Return Bullet compound collision shape.
-    btCompoundShape* GetCompoundShape() const { return compoundShape_; }
+    btCompoundShape* GetCompoundShape() const { return compoundShape_.Get(); }
+
     /// Return mass.
     float GetMass() const { return mass_; }
+
     /// Return rigid body position in world space.
     Vector3 GetPosition() const;
     /// Return rigid body rotation in world space.
@@ -193,30 +195,40 @@ public:
     float GetCcdRadius() const;
     /// Return continuous collision detection motion-per-simulation-step threshold.
     float GetCcdMotionThreshold() const;
+
     /// Return whether rigid body uses gravity.
     bool GetUseGravity() const { return useGravity_; }
+
     /// Return gravity override. If zero (default), uses the physics world's gravity.
     const Vector3& GetGravityOverride() const { return gravityOverride_; }
+
     /// Return center of mass offset.
     const Vector3& GetCenterOfMass() const { return centerOfMass_; }
+
     /// Return kinematic mode flag.
     bool IsKinematic() const { return kinematic_; }
+
     /// Return whether this RigidBody is acting as a trigger.
     bool IsTrigger() const { return trigger_; }
+
     /// Return whether rigid body is active (not sleeping.)
     bool IsActive() const;
+
     /// Return collision layer.
     unsigned GetCollisionLayer() const { return collisionLayer_; }
+
     /// Return collision mask.
     unsigned GetCollisionMask() const { return collisionMask_; }
+
     /// Return collision event signaling mode.
     CollisionEventMode GetCollisionEventMode() const { return collisionEventMode_; }
-    /// Return colliding rigid bodies from the last simulation step.
+
+    /// Return colliding rigid bodies from the last simulation step. Only returns collisions that were sent as events (depends on collision event mode) and excludes e.g. static-static collisions.
     void GetCollidingBodies(PODVector<RigidBody*>& result) const;
 
     /// Apply new world transform after a simulation step. Called internally.
     void ApplyWorldTransform(const Vector3& newWorldPosition, const Quaternion& newWorldRotation);
-    /// Update mass and inertia to the Bullet rigid body.
+    /// Update mass and inertia to the Bullet rigid body. Readd body to world if necessary: if was in world and the Bullet collision shape to use changed.
     void UpdateMass();
     /// Update gravity parameters to the Bullet rigid body.
     void UpdateGravity();
@@ -233,9 +245,11 @@ public:
 
 protected:
     /// Handle node being assigned.
-    virtual void OnNodeSet(Node* node);
+    void OnNodeSet(Node* node) override;
+    /// Handle scene being assigned.
+    void OnSceneSet(Scene* scene) override;
     /// Handle node transform being dirtied.
-    virtual void OnMarkedDirty(Node* node);
+    void OnMarkedDirty(Node* node) override;
 
 private:
     /// Create the rigid body, or re-add to the physics world with changed flags. Calls UpdateMass().
@@ -246,15 +260,19 @@ private:
     void HandleTargetPosition(StringHash eventType, VariantMap& eventData);
     /// Handle SmoothedTransform target rotation update.
     void HandleTargetRotation(StringHash eventType, VariantMap& eventData);
+    /// Mark body dirty.
+    void MarkBodyDirty() { readdBody_ = true; }
 
     /// Bullet rigid body.
-    btRigidBody* body_;
+    UniquePtr<btRigidBody> body_;
     /// Bullet compound collision shape.
-    btCompoundShape* compoundShape_;
+    UniquePtr<btCompoundShape> compoundShape_;
     /// Compound collision shape with center of mass offset applied.
-    btCompoundShape* shiftedCompoundShape_;
+    UniquePtr<btCompoundShape> shiftedCompoundShape_;
     /// Physics world.
     WeakPtr<PhysicsWorld> physicsWorld_;
+    /// Smoothed transform, if has one.
+    WeakPtr<SmoothedTransform> smoothedTransform_;
     /// Constraints that refer to this rigid body.
     PODVector<Constraint*> constraints_;
     /// Gravity override vector.
@@ -281,14 +299,14 @@ private:
     bool trigger_;
     /// Use gravity flag.
     bool useGravity_;
-    /// Smoothed transform mode.
-    bool hasSmoothedTransform_;
     /// Readd body to world flag.
     bool readdBody_;
     /// Body exists in world flag.
     bool inWorld_;
     /// Mass update enable flag.
     bool enableMassUpdate_;
+    /// Internal flag whether has simulated at least once.
+    mutable bool hasSimulated_;
 };
 
 }

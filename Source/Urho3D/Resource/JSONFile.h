@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,46 +25,42 @@
 #include "../Resource/Resource.h"
 #include "../Resource/JSONValue.h"
 
-namespace rapidjson
-{
-    template <typename Encoding, typename Allocator> class GenericDocument;
-    typedef GenericDocument<UTF8<char>, MemoryPoolAllocator<CrtAllocator> > Document;
-}
-
 namespace Urho3D
 {
 
 /// JSON document resource.
 class URHO3D_API JSONFile : public Resource
 {
-    OBJECT(JSONFile);
+    URHO3D_OBJECT(JSONFile, Resource);
 
 public:
     /// Construct.
-    JSONFile(Context* context);
+    explicit JSONFile(Context* context);
     /// Destruct.
-    virtual ~JSONFile();
+    ~JSONFile() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Load resource from stream. May be called from a worker thread. Return true if successful.
-    virtual bool BeginLoad(Deserializer& source);
+    bool BeginLoad(Deserializer& source) override;
     /// Save resource with default indentation (one tab). Return true if successful.
-    virtual bool Save(Serializer& dest) const;
+    bool Save(Serializer& dest) const override;
     /// Save resource with user-defined indentation, only the first character (if any) of the string is used and the length of the string defines the character count. Return true if successful.
     bool Save(Serializer& dest, const String& indendation) const;
 
-    /// Clear the document and create a root value, default is object type.
-    JSONValue CreateRoot(JSONValueType valueType = JSON_OBJECT);
-    /// Return the root value with specific value type, Return null value if not found.
-    JSONValue GetRoot(JSONValueType valueType = JSON_ANY);
+    /// Deserialize from a string. Return true if successful.
+    bool FromString(const String& source);
+    /// Save to a string.
+    String ToString(const String& indendation = "\t") const;
 
-    /// Return rapidjson document.
-    rapidjson::Document* GetDocument() const { return document_; }
+    /// Return root value.
+    JSONValue& GetRoot() { return root_; }
+    /// Return root value.
+    const JSONValue& GetRoot() const { return root_; }
 
 private:
-    /// Rapid JSON document.
-    rapidjson::Document* document_;
+    /// JSON root value.
+    JSONValue root_;
 };
 
 }

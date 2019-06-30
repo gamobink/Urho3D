@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,29 +20,26 @@
 // THE SOFTWARE.
 //
 
-#include <Urho3D/Urho3D.h>
-
-#include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Core/CoreEvents.h>
 #include <Urho3D/Engine/Engine.h>
-#include <Urho3D/UI/Font.h>
+#include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/Graphics.h>
-#include <Urho3D/Input/Input.h>
-#include <Urho3D/Input/InputEvents.h>
 #include <Urho3D/Graphics/Octree.h>
-#include <Urho3D/Urho2D/ParticleEmitter2D.h>
-#include <Urho3D/Urho2D/ParticleEffect2D.h>
 #include <Urho3D/Graphics/Renderer.h>
+#include <Urho3D/Graphics/Zone.h>
+#include <Urho3D/Input/Input.h>
 #include <Urho3D/Resource/ResourceCache.h>
 #include <Urho3D/Scene/Scene.h>
+#include <Urho3D/UI/Font.h>
 #include <Urho3D/UI/Text.h>
-#include <Urho3D/Graphics/Zone.h>
+#include <Urho3D/Urho2D/ParticleEffect2D.h>
+#include <Urho3D/Urho2D/ParticleEmitter2D.h>
 
 #include "Urho2DParticle.h"
 
 #include <Urho3D/DebugNew.h>
 
-DEFINE_APPLICATION_MAIN(Urho2DParticle)
+URHO3D_DEFINE_APPLICATION_MAIN(Urho2DParticle)
 
 Urho2DParticle::Urho2DParticle(Context* context) :
     Sample(context)
@@ -54,8 +51,8 @@ void Urho2DParticle::Start()
     // Execute base class startup
     Sample::Start();
 
-    // Set mouse visibile
-    Input* input = GetSubsystem<Input>();
+    // Set mouse visible
+    auto* input = GetSubsystem<Input>();
     input->SetMouseVisible(true);
 
     // Create the scene content
@@ -69,6 +66,9 @@ void Urho2DParticle::Start()
 
     // Hook up to the frame update events
     SubscribeToEvents();
+
+    // Set the mouse mode to use in the sample
+    Sample::InitMouseMode(MM_FREE);
 }
 
 void Urho2DParticle::CreateScene()
@@ -81,38 +81,38 @@ void Urho2DParticle::CreateScene()
     // Set camera's position
     cameraNode_->SetPosition(Vector3(0.0f, 0.0f, -10.0f));
 
-    Camera* camera = cameraNode_->CreateComponent<Camera>();
+    auto* camera = cameraNode_->CreateComponent<Camera>();
     camera->SetOrthographic(true);
 
-    Graphics* graphics = GetSubsystem<Graphics>();
+    auto* graphics = GetSubsystem<Graphics>();
     camera->SetOrthoSize((float)graphics->GetHeight() * PIXEL_SIZE);
     camera->SetZoom(1.2f * Min((float)graphics->GetWidth() / 1280.0f, (float)graphics->GetHeight() / 800.0f)); // Set zoom according to user's resolution to ensure full visibility (initial zoom (1.2) is set for full visibility at 1280x800 resolution)
 
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
-    ParticleEffect2D* particleEffect = cache->GetResource<ParticleEffect2D>("Urho2D/sun.pex");
+    auto* cache = GetSubsystem<ResourceCache>();
+    auto* particleEffect = cache->GetResource<ParticleEffect2D>("Urho2D/sun.pex");
     if (!particleEffect)
         return;
 
     particleNode_ = scene_->CreateChild("ParticleEmitter2D");
-    ParticleEmitter2D* particleEmitter = particleNode_->CreateComponent<ParticleEmitter2D>();
+    auto* particleEmitter = particleNode_->CreateComponent<ParticleEmitter2D>();
     particleEmitter->SetEffect(particleEffect);
 
-    ParticleEffect2D* greenSpiralEffect = cache->GetResource<ParticleEffect2D>("Urho2D/greenspiral.pex");
+    auto* greenSpiralEffect = cache->GetResource<ParticleEffect2D>("Urho2D/greenspiral.pex");
     if (!greenSpiralEffect)
         return;
 
     Node* greenSpiralNode = scene_->CreateChild("GreenSpiral");
-    ParticleEmitter2D* greenSpiralEmitter = greenSpiralNode->CreateComponent<ParticleEmitter2D>();
+    auto* greenSpiralEmitter = greenSpiralNode->CreateComponent<ParticleEmitter2D>();
     greenSpiralEmitter->SetEffect(greenSpiralEffect);
 }
 
 void Urho2DParticle::CreateInstructions()
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
-    UI* ui = GetSubsystem<UI>();
+    auto* cache = GetSubsystem<ResourceCache>();
+    auto* ui = GetSubsystem<UI>();
 
     // Construct new Text object, set string to display and font to use
-    Text* instructionText = ui->GetRoot()->CreateChild<Text>();
+    auto* instructionText = ui->GetRoot()->CreateChild<Text>();
     instructionText->SetText("Use mouse/touch to move the particle.");
     instructionText->SetFont(cache->GetResource<Font>("Fonts/Anonymous Pro.ttf"), 15);
 
@@ -124,7 +124,7 @@ void Urho2DParticle::CreateInstructions()
 
 void Urho2DParticle::SetupViewport()
 {
-    Renderer* renderer = GetSubsystem<Renderer>();
+    auto* renderer = GetSubsystem<Renderer>();
 
     // Set up a viewport to the Renderer subsystem so that the 3D scene can be seen
     SharedPtr<Viewport> viewport(new Viewport(context_, scene_, cameraNode_->GetComponent<Camera>()));
@@ -133,9 +133,9 @@ void Urho2DParticle::SetupViewport()
 
 void Urho2DParticle::SubscribeToEvents()
 {
-    SubscribeToEvent(E_MOUSEMOVE, HANDLER(Urho2DParticle, HandleMouseMove));
+    SubscribeToEvent(E_MOUSEMOVE, URHO3D_HANDLER(Urho2DParticle, HandleMouseMove));
     if (touchEnabled_)
-        SubscribeToEvent(E_TOUCHMOVE, HANDLER(Urho2DParticle, HandleMouseMove));
+        SubscribeToEvent(E_TOUCHMOVE, URHO3D_HANDLER(Urho2DParticle, HandleMouseMove));
 
     // Unsubscribe the SceneUpdate event from base class to prevent camera pitch and yaw in 2D sample
     UnsubscribeFromEvent(E_SCENEUPDATE);
@@ -146,10 +146,10 @@ void Urho2DParticle::HandleMouseMove(StringHash eventType, VariantMap& eventData
     if (particleNode_)
     {
         using namespace MouseMove;
-        float x = (float)eventData[P_X].GetInt();
-        float y = (float)eventData[P_Y].GetInt();
-        Graphics* graphics = GetSubsystem<Graphics>();
-        Camera* camera = cameraNode_->GetComponent<Camera>();
+        auto x = (float)eventData[P_X].GetInt();
+        auto y = (float)eventData[P_Y].GetInt();
+        auto* graphics = GetSubsystem<Graphics>();
+        auto* camera = cameraNode_->GetComponent<Camera>();
         particleNode_->SetPosition(camera->ScreenToWorldPoint(Vector3(x / graphics->GetWidth(), y / graphics->GetHeight(), 10.0f)));
     }
 }

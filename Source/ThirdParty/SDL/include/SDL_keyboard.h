@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2014 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -19,16 +19,14 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
-// Modified by OvermindDL1 for Urho3D
-
 /**
  *  \file SDL_keyboard.h
  *
  *  Include file for SDL keyboard event handling
  */
 
-#ifndef _SDL_keyboard_h
-#define _SDL_keyboard_h
+#ifndef SDL_keyboard_h_
+#define SDL_keyboard_h_
 
 #include "SDL_stdinc.h"
 #include "SDL_error.h"
@@ -51,7 +49,7 @@ typedef struct SDL_Keysym
     SDL_Scancode scancode;      /**< SDL physical key code - see ::SDL_Scancode for details */
     SDL_Keycode sym;            /**< SDL virtual key code - see ::SDL_Keycode for details */
     Uint16 mod;                 /**< current key modifiers */
-    Uint32 raw;
+    Uint32 unused;
 } SDL_Keysym;
 
 /* Function prototypes */
@@ -138,7 +136,7 @@ extern DECLSPEC SDL_Scancode SDLCALL SDL_GetScancodeFromName(const char *name);
  *          copy it.  If the key doesn't have a name, this function returns an
  *          empty string ("").
  *
- *  \sa SDL_Key
+ *  \sa SDL_Keycode
  */
 extern DECLSPEC const char *SDLCALL SDL_GetKeyName(SDL_Keycode key);
 
@@ -214,6 +212,6 @@ extern DECLSPEC SDL_bool SDLCALL SDL_IsScreenKeyboardShown(SDL_Window *window);
 #endif
 #include "close_code.h"
 
-#endif /* _SDL_keyboard_h */
+#endif /* SDL_keyboard_h_ */
 
 /* vi: set ts=4 sw=4 expandtab: */

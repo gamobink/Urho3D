@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,21 +20,21 @@
 // THE SOFTWARE.
 //
 
-#include "../Engine/Console.h"
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
 #include "../Core/CoreEvents.h"
-#include "../UI/DropDownList.h"
+#include "../Engine/Console.h"
 #include "../Engine/EngineEvents.h"
-#include "../UI/Font.h"
 #include "../Graphics/Graphics.h"
-#include "../Graphics/GraphicsEvents.h"
 #include "../Input/Input.h"
-#include "../Input/InputEvents.h"
 #include "../IO/IOEvents.h"
-#include "../UI/LineEdit.h"
-#include "../UI/ListView.h"
 #include "../IO/Log.h"
 #include "../Resource/ResourceCache.h"
+#include "../UI/DropDownList.h"
+#include "../UI/Font.h"
+#include "../UI/LineEdit.h"
+#include "../UI/ListView.h"
 #include "../UI/ScrollBar.h"
 #include "../UI/Text.h"
 #include "../UI/UI.h"
@@ -48,14 +48,25 @@ namespace Urho3D
 static const int DEFAULT_CONSOLE_ROWS = 16;
 static const int DEFAULT_HISTORY_SIZE = 16;
 
+const char* logStyles[] =
+{
+    "ConsoleDebugText",
+    "ConsoleInfoText",
+    "ConsoleWarningText",
+    "ConsoleErrorText",
+    "ConsoleText"
+};
+
 Console::Console(Context* context) :
     Object(context),
     autoVisibleOnError_(false),
     historyRows_(DEFAULT_HISTORY_SIZE),
     historyPosition_(0),
+    autoCompletePosition_(0),
+    historyOrAutoCompleteChange_(false),
     printing_(false)
 {
-    UI* ui = GetSubsystem<UI>();
+    auto* ui = GetSubsystem<UI>();
     UIElement* uiRoot = ui->GetRoot();
 
     // By default prevent the automatic showing of the screen keyboard
@@ -88,13 +99,14 @@ Console::Console(Context* context) :
 
     SetNumRows(DEFAULT_CONSOLE_ROWS);
 
-    SubscribeToEvent(interpreters_, E_ITEMSELECTED, HANDLER(Console, HandleInterpreterSelected));
-    SubscribeToEvent(lineEdit_, E_TEXTFINISHED, HANDLER(Console, HandleTextFinished));
-    SubscribeToEvent(lineEdit_, E_UNHANDLEDKEY, HANDLER(Console, HandleLineEditKey));
-    SubscribeToEvent(closeButton_, E_RELEASED, HANDLER(Console, HandleCloseButtonPressed));
-    SubscribeToEvent(E_SCREENMODE, HANDLER(Console, HandleScreenMode));
-    SubscribeToEvent(E_LOGMESSAGE, HANDLER(Console, HandleLogMessage));
-    SubscribeToEvent(E_POSTUPDATE, HANDLER(Console, HandlePostUpdate));
+    SubscribeToEvent(interpreters_, E_ITEMSELECTED, URHO3D_HANDLER(Console, HandleInterpreterSelected));
+    SubscribeToEvent(lineEdit_, E_TEXTCHANGED, URHO3D_HANDLER(Console, HandleTextChanged));
+    SubscribeToEvent(lineEdit_, E_TEXTFINISHED, URHO3D_HANDLER(Console, HandleTextFinished));
+    SubscribeToEvent(lineEdit_, E_UNHANDLEDKEY, URHO3D_HANDLER(Console, HandleLineEditKey));
+    SubscribeToEvent(closeButton_, E_RELEASED, URHO3D_HANDLER(Console, HandleCloseButtonPressed));
+    SubscribeToEvent(uiRoot, E_RESIZED, URHO3D_HANDLER(Console, HandleRootElementResized));
+    SubscribeToEvent(E_LOGMESSAGE, URHO3D_HANDLER(Console, HandleLogMessage));
+    SubscribeToEvent(E_POSTUPDATE, URHO3D_HANDLER(Console, HandlePostUpdate));
 }
 
 Console::~Console()
@@ -120,28 +132,38 @@ void Console::SetDefaultStyle(XMLFile* style)
 
     closeButton_->SetDefaultStyle(style);
     closeButton_->SetStyle("CloseButton");
-    
+
     UpdateElements();
 }
 
 void Console::SetVisible(bool enable)
 {
-    Input* input = GetSubsystem<Input>();
+    auto* input = GetSubsystem<Input>();
+    auto* ui = GetSubsystem<UI>();
+    Cursor* cursor = ui->GetCursor();
+
     background_->SetVisible(enable);
     closeButton_->SetVisible(enable);
+
     if (enable)
     {
         // Check if we have receivers for E_CONSOLECOMMAND every time here in case the handler is being added later dynamically
         bool hasInterpreter = PopulateInterpreter();
         commandLine_->SetVisible(hasInterpreter);
         if (hasInterpreter && focusOnShow_)
-            GetSubsystem<UI>()->SetFocusElement(lineEdit_);
+            ui->SetFocusElement(lineEdit_);
 
         // Ensure the background has no empty space when shown without the lineedit
         background_->SetHeight(background_->GetMinHeight());
 
-        // Show OS mouse
-        input->SetMouseVisible(true, true);
+        if (!cursor)
+        {
+            // Show OS mouse
+            input->SetMouseMode(MM_FREE, true);
+            input->SetMouseVisible(true, true);
+        }
+
+        input->SetMouseGrabbed(false, true);
     }
     else
     {
@@ -149,8 +171,14 @@ void Console::SetVisible(bool enable)
         interpreters_->SetFocus(false);
         lineEdit_->SetFocus(false);
 
-        // Restore OS mouse visibility
-        input->ResetMouseVisible();
+        if (!cursor)
+        {
+            // Restore OS mouse visibility
+            input->ResetMouseMode();
+            input->ResetMouseVisible();
+        }
+
+        input->ResetMouseGrabbed();
     }
 }
 
@@ -178,7 +206,7 @@ void Console::SetNumBufferedRows(unsigned rows)
         // We have less, add more rows at the top
         for (int i = 0; i > delta; --i)
         {
-            Text* text = new Text(context_);
+            auto* text = new Text(context_);
             // If style is already set, apply here to ensure proper height of the console when
             // amount of rows is changed
             if (background_->GetDefaultStyle())
@@ -202,7 +230,7 @@ void Console::SetNumRows(unsigned rows)
     displayedRows_ = rows;
     if (GetNumBufferedRows() < rows)
         SetNumBufferedRows(rows);
-    
+
     UpdateElements();
 }
 
@@ -220,13 +248,33 @@ void Console::SetFocusOnShow(bool enable)
     focusOnShow_ = enable;
 }
 
+void Console::AddAutoComplete(const String& option)
+{
+    // Sorted insertion
+    Vector<String>::Iterator iter = UpperBound(autoComplete_.Begin(), autoComplete_.End(), option);
+    if (!iter.ptr_)
+        autoComplete_.Push(option);
+    // Make sure it isn't a duplicate
+    else if (iter == autoComplete_.Begin() || *(iter - 1) != option)
+        autoComplete_.Insert(iter, option);
+}
+
+void Console::RemoveAutoComplete(const String& option)
+{
+    // Erase and keep ordered
+    autoComplete_.Erase(LowerBound(autoComplete_.Begin(), autoComplete_.End(), option));
+    if (autoCompletePosition_ > autoComplete_.Size())
+        autoCompletePosition_ = autoComplete_.Size();
+}
+
 void Console::UpdateElements()
 {
-    int width = GetSubsystem<Graphics>()->GetWidth();
+    int width = GetSubsystem<UI>()->GetRoot()->GetWidth();
     const IntRect& border = background_->GetLayoutBorder();
     const IntRect& panelBorder = rowContainer_->GetScrollPanel()->GetClipBorder();
     rowContainer_->SetFixedWidth(width - border.left_ - border.right_);
-    rowContainer_->SetFixedHeight(displayedRows_ * rowContainer_->GetItem((unsigned)0)->GetHeight() + panelBorder.top_ + panelBorder.bottom_ +
+    rowContainer_->SetFixedHeight(
+        displayedRows_ * rowContainer_->GetItem((unsigned)0)->GetHeight() + panelBorder.top_ + panelBorder.bottom_ +
         (rowContainer_->GetHorizontalScrollBar()->IsVisible() ? rowContainer_->GetHorizontalScrollBar()->GetHeight() : 0));
     background_->SetFixedWidth(width);
     background_->SetHeight(background_->GetMinHeight());
@@ -261,13 +309,17 @@ bool Console::PopulateInterpreter()
 {
     interpreters_->RemoveAllItems();
 
-    HashSet<Object*>* receivers = context_->GetEventReceivers(E_CONSOLECOMMAND);
-    if (!receivers || receivers->Empty())
+    EventReceiverGroup* group = context_->GetEventReceivers(E_CONSOLECOMMAND);
+    if (!group || group->receivers_.Empty())
         return false;
 
     Vector<String> names;
-    for (HashSet<Object*>::ConstIterator iter = receivers->Begin(); iter != receivers->End(); ++iter)
-        names.Push((*iter)->GetTypeName());
+    for (unsigned i = 0; i < group->receivers_.Size(); ++i)
+    {
+        Object* receiver = group->receivers_[i];
+        if (receiver)
+            names.Push(receiver->GetTypeName());
+    }
     Sort(names.Begin(), names.End());
 
     unsigned selection = M_MAX_UNSIGNED;
@@ -276,7 +328,7 @@ bool Console::PopulateInterpreter()
         const String& name = names[i];
         if (name == commandInterpreter_)
             selection = i;
-        Text* text = new Text(context_);
+        auto* text = new Text(context_);
         text->SetStyle("ConsoleText");
         text->SetText(name);
         interpreters_->AddItem(text);
@@ -304,6 +356,16 @@ void Console::HandleInterpreterSelected(StringHash eventType, VariantMap& eventD
     lineEdit_->SetFocus(true);
 }
 
+void Console::HandleTextChanged(StringHash eventType, VariantMap & eventData)
+{
+    // Save the original line
+    // Make sure the change isn't caused by auto complete or history
+    if (!historyOrAutoCompleteChange_)
+        autoCompleteLine_ = eventData[TextEntry::P_TEXT].GetString();
+
+    historyOrAutoCompleteChange_ = false;
+}
+
 void Console::HandleTextFinished(StringHash eventType, VariantMap& eventData)
 {
     using namespace TextFinished;
@@ -314,16 +376,21 @@ void Console::HandleTextFinished(StringHash eventType, VariantMap& eventData)
         // Send the command as an event for script subsystem
         using namespace ConsoleCommand;
 
-        VariantMap& eventData = GetEventDataMap();
-        eventData[P_COMMAND] = line;
-        eventData[P_ID] = static_cast<Text*>(interpreters_->GetSelectedItem())->GetText();
-        SendEvent(E_CONSOLECOMMAND, eventData);
+        SendEvent(E_CONSOLECOMMAND,
+            P_COMMAND, line,
+            P_ID, static_cast<Text*>(interpreters_->GetSelectedItem())->GetText());
 
-        // Store to history, then clear the lineedit
-        history_.Push(line);
-        if (history_.Size() > historyRows_)
-            history_.Erase(history_.Begin());
-        historyPosition_ = history_.Size();
+        // Make sure the line isn't the same as the last one
+        if (history_.Empty() || line != history_.Back())
+        {
+            // Store to history, then clear the lineedit
+            history_.Push(line);
+            if (history_.Size() > historyRows_)
+                history_.Erase(history_.Begin());
+        }
+
+        historyPosition_ = history_.Size(); // Reset
+        autoCompletePosition_ = autoComplete_.Size(); // Reset
 
         currentRow_.Clear();
         lineEdit_->SetText(currentRow_);
@@ -342,30 +409,109 @@ void Console::HandleLineEditKey(StringHash eventType, VariantMap& eventData)
     switch (eventData[P_KEY].GetInt())
     {
     case KEY_UP:
-        if (historyPosition_ > 0)
+        if (autoCompletePosition_ == 0)
+            autoCompletePosition_ = autoComplete_.Size();
+
+        if (autoCompletePosition_ < autoComplete_.Size())
         {
+            // Search for auto completion that contains the contents of the line
+            for (--autoCompletePosition_; autoCompletePosition_ != M_MAX_UNSIGNED; --autoCompletePosition_)
+            {
+                const String& current = autoComplete_[autoCompletePosition_];
+                if (current.StartsWith(autoCompleteLine_))
+                {
+                    historyOrAutoCompleteChange_ = true;
+                    lineEdit_->SetText(current);
+                    break;
+                }
+            }
+
+            // If not found
+            if (autoCompletePosition_ == M_MAX_UNSIGNED)
+            {
+                // Reset the position
+                autoCompletePosition_ = autoComplete_.Size();
+                // Reset history position
+                historyPosition_ = history_.Size();
+            }
+        }
+
+        // If no more auto complete options and history options left
+        if (autoCompletePosition_ == autoComplete_.Size() && historyPosition_ > 0)
+        {
+            // If line text is not a history, save the current text value to be restored later
             if (historyPosition_ == history_.Size())
                 currentRow_ = lineEdit_->GetText();
+            // Use the previous option
             --historyPosition_;
             changed = true;
         }
         break;
 
     case KEY_DOWN:
+        // If history options left
         if (historyPosition_ < history_.Size())
         {
+            // Use the next option
             ++historyPosition_;
             changed = true;
         }
+        else
+        {
+            // Loop over
+            if (autoCompletePosition_ >= autoComplete_.Size())
+                autoCompletePosition_ = 0;
+            else
+                ++autoCompletePosition_; // If not starting over, skip checking the currently found completion
+
+            unsigned startPosition = autoCompletePosition_;
+
+            // Search for auto completion that contains the contents of the line
+            for (; autoCompletePosition_ < autoComplete_.Size(); ++autoCompletePosition_)
+            {
+                const String& current = autoComplete_[autoCompletePosition_];
+                if (current.StartsWith(autoCompleteLine_))
+                {
+                    historyOrAutoCompleteChange_ = true;
+                    lineEdit_->SetText(current);
+                    break;
+                }
+            }
+
+            // Continue to search the complete range
+            if (autoCompletePosition_ == autoComplete_.Size())
+            {
+                for (autoCompletePosition_ = 0; autoCompletePosition_ != startPosition; ++autoCompletePosition_)
+                {
+                    const String& current = autoComplete_[autoCompletePosition_];
+                    if (current.StartsWith(autoCompleteLine_))
+                    {
+                        historyOrAutoCompleteChange_ = true;
+                        lineEdit_->SetText(current);
+                        break;
+                    }
+                }
+            }
+        }
         break;
+
+    default: break;
     }
 
     if (changed)
     {
+        historyOrAutoCompleteChange_ = true;
+        // Set text to history option
         if (historyPosition_ < history_.Size())
             lineEdit_->SetText(history_[historyPosition_]);
-        else
+        else // restore the original line value before it was set to history values
+        {
             lineEdit_->SetText(currentRow_);
+            // Set the auto complete position according to the currentRow
+            for (autoCompletePosition_ = 0; autoCompletePosition_ < autoComplete_.Size(); ++autoCompletePosition_)
+                if (autoComplete_[autoCompletePosition_].StartsWith(currentRow_))
+                    break;
+        }
     }
 }
 
@@ -374,7 +520,7 @@ void Console::HandleCloseButtonPressed(StringHash eventType, VariantMap& eventDa
     SetVisible(false);
 }
 
-void Console::HandleScreenMode(StringHash eventType, VariantMap& eventData)
+void Console::HandleRootElementResized(StringHash eventType, VariantMap& eventData)
 {
     UpdateElements();
 }
@@ -384,13 +530,13 @@ void Console::HandleLogMessage(StringHash eventType, VariantMap& eventData)
     // If printing a log message causes more messages to be logged (error accessing font), disregard them
     if (printing_)
         return;
-    
+
     using namespace LogMessage;
 
     int level = eventData[P_LEVEL].GetInt();
     // The message may be multi-line, so split to rows in that case
     Vector<String> rows = eventData[P_MESSAGE].GetString().Split('\n');
-    
+
     for (unsigned i = 0; i < rows.Size(); ++i)
         pendingRows_.Push(MakePair(level, rows[i]));
 
@@ -403,7 +549,7 @@ void Console::HandlePostUpdate(StringHash eventType, VariantMap& eventData)
     // Ensure UI-elements are not detached
     if (!background_->GetParent())
     {
-        UI* ui = GetSubsystem<UI>();
+        auto* ui = GetSubsystem<UI>();
         UIElement* uiRoot = ui->GetRoot();
         uiRoot->AddChild(background_);
         uiRoot->AddChild(closeButton_);
@@ -411,23 +557,25 @@ void Console::HandlePostUpdate(StringHash eventType, VariantMap& eventData)
 
     if (!rowContainer_->GetNumItems() || pendingRows_.Empty())
         return;
-    
+
     printing_ = true;
     rowContainer_->DisableLayoutUpdate();
-    
-    Text* text;
+
+    Text* text = nullptr;
     for (unsigned i = 0; i < pendingRows_.Size(); ++i)
     {
         rowContainer_->RemoveItem((unsigned)0);
         text = new Text(context_);
         text->SetText(pendingRows_[i].second_);
-        // Make error message highlight
-        text->SetStyle(pendingRows_[i].first_ == LOG_ERROR ? "ConsoleHighlightedText" : "ConsoleText");
+
+        // Highlight console messages based on their type
+        text->SetStyle(logStyles[pendingRows_[i].first_]);
+
         rowContainer_->AddItem(text);
     }
-    
+
     pendingRows_.Clear();
-    
+
     rowContainer_->EnsureItemVisibility(text);
     rowContainer_->EnableLayoutUpdate();
     rowContainer_->UpdateLayout();

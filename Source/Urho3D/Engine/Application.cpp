@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,32 +20,30 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Engine/Application.h"
-#include "../Engine/Engine.h"
-#ifdef IOS
-#include "../Graphics/Graphics.h"
-#include "../Graphics/GraphicsImpl.h"
-#endif
 #include "../IO/IOEvents.h"
 #include "../IO/Log.h"
-#include "../Core/ProcessUtils.h"
 
-#include <exception>
+#if defined(IOS) || defined(TVOS)
+#include "../Graphics/Graphics.h"
+#include <SDL/SDL.h>
+#endif
 
 #include "../DebugNew.h"
 
 namespace Urho3D
 {
 
-#if defined(IOS) || defined(EMSCRIPTEN)
+#if defined(IOS) || defined(TVOS) || defined(__EMSCRIPTEN__)
 // Code for supporting SDL_iPhoneSetAnimationCallback() and emscripten_set_main_loop_arg()
-#if defined(EMSCRIPTEN)
-#include <emscripten.h>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
 #endif
 void RunFrame(void* data)
 {
-    Engine* engine = reinterpret_cast<Engine*>(data);
-    engine->RunFrame();
+    static_cast<Engine*>(data)->RunFrame();
 }
 #endif
 
@@ -59,16 +57,15 @@ Application::Application(Context* context) :
     engine_ = new Engine(context);
 
     // Subscribe to log messages so that can show errors if ErrorExit() is called with empty message
-    SubscribeToEvent(E_LOGMESSAGE, HANDLER(Application, HandleLogMessage));
+    SubscribeToEvent(E_LOGMESSAGE, URHO3D_HANDLER(Application, HandleLogMessage));
 }
 
 int Application::Run()
 {
-    // Emscripten-specific: C++ exceptions are turned off by default in -O1 (and above), unless '-s DISABLE_EXCEPTION_CATCHING=0' flag is set
-    // Urho3D build configuration uses -O3 (Release), -O2 (RelWithDebInfo), and -O0 (Debug)
-    // Thus, the try-catch block below should be optimised out except in Debug build configuration
+#if !defined(__GNUC__) || __EXCEPTIONS
     try
     {
+#endif
         Setup();
         if (exitCode_)
             return exitCode_;
@@ -83,29 +80,31 @@ int Application::Run()
         if (exitCode_)
             return exitCode_;
 
-        // Platforms other than iOS and EMSCRIPTEN run a blocking main loop
-        #if !defined(IOS) && !defined(EMSCRIPTEN)
+        // Platforms other than iOS/tvOS and Emscripten run a blocking main loop
+#if !defined(IOS) && !defined(TVOS) && !defined(__EMSCRIPTEN__)
         while (!engine_->IsExiting())
             engine_->RunFrame();
 
         Stop();
-        // iOS will setup a timer for running animation frames so eg. Game Center can run. In this case we do not
+        // iOS/tvOS will setup a timer for running animation frames so eg. Game Center can run. In this case we do not
         // support calling the Stop() function, as the application will never stop manually
-        #else
-        #if defined(IOS)
-        SDL_iPhoneSetAnimationCallback(GetSubsystem<Graphics>()->GetImpl()->GetWindow(), 1, &RunFrame, engine_);
-        #elif defined(EMSCRIPTEN)
+#else
+#if defined(IOS) || defined(TVOS)
+        SDL_iPhoneSetAnimationCallback(GetSubsystem<Graphics>()->GetWindow(), 1, &RunFrame, engine_);
+#elif defined(__EMSCRIPTEN__)
         emscripten_set_main_loop_arg(RunFrame, engine_, 0, 1);
-        #endif
-        #endif
+#endif
+#endif
 
         return exitCode_;
+#if !defined(__GNUC__) || __EXCEPTIONS
     }
     catch (std::bad_alloc&)
     {
         ErrorDialog(GetTypeName(), "An out-of-memory error occurred. The application will now exit.");
         return EXIT_FAILURE;
     }
+#endif
 }
 
 void Application::ErrorExit(const String& message)
@@ -113,13 +112,10 @@ void Application::ErrorExit(const String& message)
     engine_->Exit(); // Close the rendering window
     exitCode_ = EXIT_FAILURE;
 
-    // Only for WIN32, otherwise the error messages would be double posted on Mac OS X and Linux platforms
     if (!message.Length())
     {
-        #ifdef WIN32
         ErrorDialog(GetTypeName(), startupErrors_.Length() ? startupErrors_ :
             "Application has been terminated due to unexpected error.");
-        #endif
     }
     else
         ErrorDialog(GetTypeName(), message);

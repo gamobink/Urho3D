@@ -11,7 +11,7 @@
 #include "Scripts/Utilities/Sample.as"
 
 Window@ window;
-IntVector2 dragBeginPosition = IntVector2(0, 0);
+IntVector2 dragBeginPosition = IntVector2::ZERO;
 
 void Start()
 {
@@ -35,6 +35,9 @@ void Start()
 
     // Create a draggable Fish
     CreateDraggableFish();
+
+    // Set the mouse mode to use in the sample
+    SampleInitMouseMode(MM_FREE);
 }
 
 void InitControls()
@@ -71,7 +74,7 @@ void InitWindow()
     ui.root.AddChild(window);
 
     // Set Window size and layout settings
-    window.SetMinSize(384, 192);
+    window.minWidth = 384;
     window.SetLayout(LM_VERTICAL, 6, IntRect(6, 6, 6, 6));
     window.SetAlignment(HA_CENTER, VA_CENTER);
     window.name = "Window";
@@ -137,7 +140,7 @@ void CreateDraggableFish()
 
 void HandleDragBegin(StringHash eventType, VariantMap& eventData)
 {
-    // Get UIElement relative position where input (touch or click) occured (top-left = IntVector2(0,0))
+    // Get UIElement relative position where input (touch or click) occurred (top-left = IntVector2(0,0))
     dragBeginPosition = IntVector2(eventData["ElementX"].GetInt(), eventData["ElementY"].GetInt());
 }
 

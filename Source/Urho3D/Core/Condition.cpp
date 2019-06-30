@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,11 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Condition.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -31,17 +33,18 @@
 namespace Urho3D
 {
 
-#ifdef WIN32
+#ifdef _WIN32
+
 Condition::Condition() :
-    event_(0)
+    event_(nullptr)
 {
-    event_ = CreateEvent(0, FALSE, FALSE, 0);
+    event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 }
 
 Condition::~Condition()
 {
     CloseHandle((HANDLE)event_);
-    event_ = 0;
+    event_ = nullptr;
 }
 
 void Condition::Set()
@@ -53,26 +56,28 @@ void Condition::Wait()
 {
     WaitForSingleObject((HANDLE)event_, INFINITE);
 }
+
 #else
+
 Condition::Condition() :
     mutex_(new pthread_mutex_t),
     event_(new pthread_cond_t)
 {
-    pthread_mutex_init((pthread_mutex_t*)mutex_, 0);
-    pthread_cond_init((pthread_cond_t*)event_, 0);
+    pthread_mutex_init((pthread_mutex_t*)mutex_, nullptr);
+    pthread_cond_init((pthread_cond_t*)event_, nullptr);
 }
 
 Condition::~Condition()
 {
-    pthread_cond_t* cond = (pthread_cond_t*)event_;
-    pthread_mutex_t* mutex = (pthread_mutex_t*)mutex_;
-    
+    auto* cond = (pthread_cond_t*)event_;
+    auto* mutex = (pthread_mutex_t*)mutex_;
+
     pthread_cond_destroy(cond);
     pthread_mutex_destroy(mutex);
     delete cond;
     delete mutex;
-    event_ = 0;
-    mutex_ = 0;
+    event_ = nullptr;
+    mutex_ = nullptr;
 }
 
 void Condition::Set()
@@ -82,13 +87,14 @@ void Condition::Set()
 
 void Condition::Wait()
 {
-    pthread_cond_t* cond = (pthread_cond_t*)event_;
-    pthread_mutex_t* mutex = (pthread_mutex_t*)mutex_;
-    
+    auto* cond = (pthread_cond_t*)event_;
+    auto* mutex = (pthread_mutex_t*)mutex_;
+
     pthread_mutex_lock(mutex);
     pthread_cond_wait(cond, mutex);
     pthread_mutex_unlock(mutex);
 }
+
 #endif
 
 }

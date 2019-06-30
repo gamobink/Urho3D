@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,20 +30,20 @@ using namespace Urho3D;
 /// Custom logic component for rotating a scene node.
 class Rotator : public LogicComponent
 {
-    OBJECT(Rotator);
-    
+    URHO3D_OBJECT(Rotator, LogicComponent);
+
 public:
     /// Construct.
-    Rotator(Context* context);
-    
+    explicit Rotator(Context* context);
+
     /// Set rotation speed about the Euler axes. Will be scaled with scene update time step.
     void SetRotationSpeed(const Vector3& speed);
     /// Handle scene update. Called by LogicComponent base class.
-    virtual void Update(float timeStep);
-    
+    void Update(float timeStep) override;
+
     /// Return rotation speed.
     const Vector3& GetRotationSpeed() const { return rotationSpeed_; }
-    
+
 private:
     /// Rotation speed.
     Vector3 rotationSpeed_;

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,16 +20,16 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Graphics/Camera.h"
 #include "../Graphics/Graphics.h"
-#include "../IO/Log.h"
 #include "../Graphics/Renderer.h"
 #include "../Graphics/RenderPath.h"
-#include "../Resource/ResourceCache.h"
-#include "../Scene/Scene.h"
 #include "../Graphics/View.h"
-#include "../Graphics/Viewport.h"
+#include "../Resource/ResourceCache.h"
 #include "../Resource/XMLFile.h"
+#include "../Scene/Scene.h"
 
 #include "../DebugNew.h"
 
@@ -41,7 +41,7 @@ Viewport::Viewport(Context* context) :
     rect_(IntRect::ZERO),
     drawDebug_(true)
 {
-    SetRenderPath((RenderPath*)0);
+    SetRenderPath((RenderPath*)nullptr);
 }
 
 Viewport::Viewport(Context* context, Scene* scene, Camera* camera, RenderPath* renderPath) :
@@ -54,7 +54,7 @@ Viewport::Viewport(Context* context, Scene* scene, Camera* camera, RenderPath* r
     SetRenderPath(renderPath);
 }
 
-Viewport::Viewport(Context* context, Scene* scene, Camera* camera, const IntRect& rect, RenderPath* renderPath) :
+Viewport::Viewport(Context* context, Scene* scene, Camera* camera, const IntRect& rect, RenderPath* renderPath) :   // NOLINT(modernize-pass-by-value)
     Object(context),
     scene_(scene),
     camera_(camera),
@@ -64,9 +64,7 @@ Viewport::Viewport(Context* context, Scene* scene, Camera* camera, const IntRect
     SetRenderPath(renderPath);
 }
 
-Viewport::~Viewport()
-{
-}
+Viewport::~Viewport() = default;
 
 void Viewport::SetScene(Scene* scene)
 {
@@ -76,6 +74,11 @@ void Viewport::SetScene(Scene* scene)
 void Viewport::SetCamera(Camera* camera)
 {
     camera_ = camera;
+}
+
+void Viewport::SetCullCamera(Camera* camera)
+{
+    cullCamera_ = camera;
 }
 
 void Viewport::SetRect(const IntRect& rect)
@@ -94,7 +97,7 @@ void Viewport::SetRenderPath(RenderPath* renderPath)
         renderPath_ = renderPath;
     else
     {
-        Renderer* renderer = GetSubsystem<Renderer>();
+        auto* renderer = GetSubsystem<Renderer>();
         if (renderer)
             renderPath_ = renderer->GetDefaultRenderPath();
     }
@@ -117,6 +120,11 @@ Camera* Viewport::GetCamera() const
     return camera_;
 }
 
+Camera* Viewport::GetCullCamera() const
+{
+    return cullCamera_;
+}
+
 View* Viewport::GetView() const
 {
     return view_;
@@ -137,7 +145,7 @@ Ray Viewport::GetScreenRay(int x, int y) const
 
     if (rect_ == IntRect::ZERO)
     {
-        Graphics* graphics = GetSubsystem<Graphics>();
+        auto* graphics = GetSubsystem<Graphics>();
         screenX = (float)x / (float)graphics->GetWidth();
         screenY = (float)y / (float)graphics->GetHeight();
     }
@@ -161,7 +169,8 @@ IntVector2 Viewport::WorldToScreenPoint(const Vector3& worldPos) const
     int y;
     if (rect_ == IntRect::ZERO)
     {
-        Graphics* graphics = GetSubsystem<Graphics>();
+        /// \todo This is incorrect if the viewport is used on a texture rendertarget instead of the backbuffer, as it may have different dimensions.
+        auto* graphics = GetSubsystem<Graphics>();
         x = (int)(screenPoint.x_ * graphics->GetWidth());
         y = (int)(screenPoint.y_ * graphics->GetHeight());
     }
@@ -170,7 +179,7 @@ IntVector2 Viewport::WorldToScreenPoint(const Vector3& worldPos) const
         x = (int)(rect_.left_ + screenPoint.x_ * rect_.Width());
         y = (int)(rect_.top_ + screenPoint.y_ * rect_.Height());
     }
-    
+
     return IntVector2(x, y);
 }
 
@@ -184,7 +193,8 @@ Vector3 Viewport::ScreenToWorldPoint(int x, int y, float depth) const
 
     if (rect_ == IntRect::ZERO)
     {
-        Graphics* graphics = GetSubsystem<Graphics>();
+        /// \todo This is incorrect if the viewport is used on a texture rendertarget instead of the backbuffer, as it may have different dimensions.
+        auto* graphics = GetSubsystem<Graphics>();
         screenX = (float)x / (float)graphics->GetWidth();
         screenY = (float)y / (float)graphics->GetHeight();
     }

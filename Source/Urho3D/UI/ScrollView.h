@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,26 +33,29 @@ class ScrollBar;
 /// Scrollable %UI element for showing a (possibly large) child element.
 class URHO3D_API ScrollView : public UIElement
 {
-    OBJECT(ScrollView);
+    URHO3D_OBJECT(ScrollView, UIElement);
 
 public:
     /// Construct.
-    ScrollView(Context* context);
+    explicit ScrollView(Context* context);
     /// Destruct.
-    virtual ~ScrollView();
+    ~ScrollView() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Perform UI element update.
-    virtual void Update(float timeStep);
+    void Update(float timeStep) override;
     /// Apply attribute changes that can not be applied immediately.
-    virtual void ApplyAttributes();
+    void ApplyAttributes() override;
     /// React to mouse wheel.
-    virtual void OnWheel(int delta, int buttons, int qualifiers);
+    void OnWheel(int delta, MouseButtonFlags buttons, QualifierFlags qualifiers) override;
     /// React to a key press.
-    virtual void OnKey(int key, int buttons, int qualifiers);
+    void OnKey(Key key, MouseButtonFlags buttons, QualifierFlags qualifiers) override;
     /// React to resize.
-    virtual void OnResize();
+    void OnResize(const IntVector2& newSize, const IntVector2& delta) override;
+
+    /// Return whether the element could handle wheel input.
+    bool IsWheelHandler() const override { return true; }
 
     /// Set content element.
     void SetContentElement(UIElement* element);
@@ -62,43 +65,68 @@ public:
     void SetViewPosition(int x, int y);
     /// Set scrollbars' visibility manually. Disables scrollbar autoshow/hide.
     void SetScrollBarsVisible(bool horizontal, bool vertical);
+    /// Set horizontal scrollbar visibility manually. Disables scrollbar autoshow/hide.
+    void SetHorizontalScrollBarVisible(bool visible);
+    /// Set vertical scrollbar visibility manually. Disables scrollbar autoshow/hide.
+    void SetVerticalScrollBarVisible(bool visible);
     /// Set whether to automatically show/hide scrollbars. Default true.
     void SetScrollBarsAutoVisible(bool enable);
     /// Set arrow key scroll step. Also sets it on the scrollbars.
     void SetScrollStep(float step);
     /// Set arrow key page step.
     void SetPageStep(float step);
+
     /// Set scroll deceleration.
     void SetScrollDeceleration(float deceleration) { scrollDeceleration_ = deceleration; }
+
     /// Set scroll snap epsilon
     void SetScrollSnapEpsilon(float snap) { scrollSnapEpsilon_ = snap; }
+
     /// Set whether child elements should be disabled while touch scrolling.
     void SetAutoDisableChildren(bool disable) { autoDisableChildren_ = disable; };
+
     /// Set how much touch movement is needed to trigger child element disabling.
     void SetAutoDisableThreshold(float amount) { autoDisableThreshold_ = amount; };
 
     /// Return view offset from the top-left corner.
     const IntVector2& GetViewPosition() const { return viewPosition_; }
+
     /// Return content element.
     UIElement* GetContentElement() const { return contentElement_; }
+
     /// Return horizontal scroll bar.
     ScrollBar* GetHorizontalScrollBar() const { return horizontalScrollBar_; }
+
     /// Return vertical scroll bar.
     ScrollBar* GetVerticalScrollBar() const { return verticalScrollBar_; }
+
     /// Return scroll panel.
     BorderImage* GetScrollPanel() const { return scrollPanel_; }
+
     /// Return whether scrollbars are automatically shown/hidden.
     bool GetScrollBarsAutoVisible() const { return scrollBarsAutoVisible_; }
+
+    /// Return whether the horizontal scrollbar is visible.
+    bool GetHorizontalScrollBarVisible() const;
+
+    /// Return whether the vertical scrollbar is visible.
+    bool GetVerticalScrollBarVisible() const;
+
     /// Return arrow key scroll step.
     float GetScrollStep() const;
+
     /// Return arrow key page step.
     float GetPageStep() const { return pageStep_; }
+
     /// Return scroll deceleration.
     float GetScrollDeceleration() const { return scrollDeceleration_; }
+
     /// Return scroll snap epsilon
     float GetScrollSnapEpsilon() const { return scrollSnapEpsilon_; }
+
     /// Return whether child element will be disabled while touch scrolling.
     bool GetAutoDisableChildren() const { return autoDisableChildren_; }
+
     /// Return how much touch movement is needed to trigger child element disabling.
     float GetAutoDisableThreshold() const { return autoDisableThreshold_; }
 
@@ -107,7 +135,7 @@ public:
 
 protected:
     /// Filter implicit attributes in serialization process.
-    virtual bool FilterImplicitAttributes(XMLElement& dest) const;
+    bool FilterImplicitAttributes(XMLElement& dest) const override;
     /// Filter implicit attributes in serialization process for internal scroll bar.
     bool FilterScrollBarImplicitAttributes(XMLElement& dest, const String& name) const;
     /// Resize panel based on scrollbar visibility.

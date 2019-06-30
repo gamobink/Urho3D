@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,23 +20,19 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
-#include "../UI/Font.h"
-#include "../UI/FontFace.h"
-#include "../Resource/Image.h"
 #include "../IO/Log.h"
 #include "../Graphics/Texture2D.h"
+#include "../Resource/Image.h"
+#include "../UI/Font.h"
+#include "../UI/FontFace.h"
 
 #include "../DebugNew.h"
 
 namespace Urho3D
 {
-
-FontGlyph::FontGlyph() :
-    page_(M_MAX_UNSIGNED),
-    used_(false)
-{
-}
 
 FontFace::FontFace(Font* font) :
     font_(font)
@@ -65,10 +61,10 @@ const FontGlyph* FontFace::GetGlyph(unsigned c)
         return &glyph;
     }
     else
-        return 0;
+        return nullptr;
 }
 
-short FontFace::GetKerning(unsigned c, unsigned d) const
+float FontFace::GetKerning(unsigned c, unsigned d) const
 {
     if (kerningMapping_.Empty())
         return 0;
@@ -79,9 +75,9 @@ short FontFace::GetKerning(unsigned c, unsigned d) const
     if (c > 0xffff || d > 0xffff)
         return 0;
 
-    unsigned value = (c << 16) + d;
+    unsigned value = (c << 16u) + d;
 
-    HashMap<unsigned, short>::ConstIterator i = kerningMapping_.Find(value);
+    HashMap<unsigned, float>::ConstIterator i = kerningMapping_.Find(value);
     if (i != kerningMapping_.End())
         return i->second_;
 
@@ -105,17 +101,17 @@ SharedPtr<Texture2D> FontFace::CreateFaceTexture()
     texture->SetMipsToSkip(QUALITY_LOW, 0); // No quality reduction
     texture->SetNumLevels(1); // No mipmaps
     texture->SetAddressMode(COORD_U, ADDRESS_BORDER);
-    texture->SetAddressMode(COORD_V, ADDRESS_BORDER),
-        texture->SetBorderColor(Color(0.0f, 0.0f, 0.0f, 0.0f));
+    texture->SetAddressMode(COORD_V, ADDRESS_BORDER);
+    texture->SetBorderColor(Color(0.0f, 0.0f, 0.0f, 0.0f));
     return texture;
 }
 
-SharedPtr<Texture2D> FontFace::LoadFaceTexture(SharedPtr<Image> image)
+SharedPtr<Texture2D> FontFace::LoadFaceTexture(const SharedPtr<Image>& image)
 {
     SharedPtr<Texture2D> texture = CreateFaceTexture();
     if (!texture->SetData(image, true))
     {
-        LOGERROR("Could not load texture from image resource");
+        URHO3D_LOGERROR("Could not load texture from image resource");
         return SharedPtr<Texture2D>();
     }
     return texture;

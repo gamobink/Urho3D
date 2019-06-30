@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,24 +47,24 @@ class VertexBuffer;
 /// Custom geometry component.
 class URHO3D_API CustomGeometry : public Drawable
 {
-    OBJECT(CustomGeometry);
+    URHO3D_OBJECT(CustomGeometry, Drawable);
 
 public:
     /// Construct.
-    CustomGeometry(Context* context);
+    explicit CustomGeometry(Context* context);
     /// Destruct.
-    virtual ~CustomGeometry();
+    ~CustomGeometry() override;
     /// Register object factory. Drawable must be registered first.
     static void RegisterObject(Context* context);
 
     /// Process octree raycast. May be called from a worker thread.
-    virtual void ProcessRayQuery(const RayOctreeQuery& query, PODVector<RayQueryResult>& results);
+    void ProcessRayQuery(const RayOctreeQuery& query, PODVector<RayQueryResult>& results) override;
     /// Return the geometry for a specific LOD level.
-    virtual Geometry* GetLodGeometry(unsigned batchIndex, unsigned level);
+    Geometry* GetLodGeometry(unsigned batchIndex, unsigned level) override;
     /// Return number of occlusion geometry triangles.
-    virtual unsigned GetNumOccluderTriangles();
+    unsigned GetNumOccluderTriangles() override;
     /// Draw to occlusion buffer. Return true if did not run out of triangles.
-    virtual bool DrawOcclusion(OcclusionBuffer* buffer);
+    bool DrawOcclusion(OcclusionBuffer* buffer) override;
 
     /// Clear all geometries.
     void Clear();
@@ -85,7 +85,9 @@ public:
     /// Define a vertex tangent.
     void DefineTangent(const Vector4& tangent);
     /// Set the primitive type, number of vertices and elements in a geometry, after which the vertices can be edited with GetVertex(). An alternative to BeginGeometry() / DefineVertex().
-    void DefineGeometry(unsigned index, PrimitiveType type, unsigned numVertices, bool hasNormals, bool hasColors, bool hasTexCoords, bool hasTangents);
+    void DefineGeometry
+        (unsigned index, PrimitiveType type, unsigned numVertices, bool hasNormals, bool hasColors, bool hasTexCoords,
+            bool hasTangents);
     /// Update vertex buffer and calculate the bounding box. Call after finishing defining geometry.
     void Commit();
     /// Set material on all geometries.
@@ -95,14 +97,19 @@ public:
 
     /// Return number of geometries.
     unsigned GetNumGeometries() const { return geometries_.Size(); }
+
     /// Return number of vertices in a geometry.
     unsigned GetNumVertices(unsigned index) const;
+
     /// Return whether vertex buffer dynamic mode is enabled.
     bool IsDynamic() const { return dynamic_; }
+
     /// Return material by geometry index.
     Material* GetMaterial(unsigned index = 0) const;
+
     /// Return all vertices. These can be edited; calling Commit() updates the vertex buffer.
     Vector<PODVector<CustomGeometryVertex> >& GetVertices() { return vertices_; }
+
     /// Return a vertex in a geometry for editing, or null if out of bounds. After the edits are finished, calling Commit() updates  the vertex buffer.
     CustomGeometryVertex* GetVertex(unsigned geometryIndex, unsigned vertexNum);
 
@@ -117,7 +124,7 @@ public:
 
 protected:
     /// Recalculate the world-space bounding box.
-    virtual void OnWorldBoundingBoxUpdate();
+    void OnWorldBoundingBoxUpdate() override;
 
 private:
     /// Primitive type per geometry.
@@ -129,7 +136,7 @@ private:
     /// Vertex buffer.
     SharedPtr<VertexBuffer> vertexBuffer_;
     /// Element mask used so far.
-    unsigned elementMask_;
+    VertexMaskFlags elementMask_;
     /// Current geometry being updated.
     unsigned geometryIndex_;
     /// Material list attribute.

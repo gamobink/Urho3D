@@ -2,6 +2,7 @@
 
 #include "Scripts/Editor/EditorHierarchyWindow.as"
 #include "Scripts/Editor/EditorInspectorWindow.as"
+#include "Scripts/Editor/EditorCubeCapture.as"
 
 const int PICK_GEOMETRIES = 0;
 const int PICK_LIGHTS = 1;
@@ -36,6 +37,8 @@ uint undoStackPos = 0;
 
 bool revertOnPause = false;
 XMLFile@ revertData;
+
+Vector3 lastOffsetForSmartDuplicate;
 
 void ClearSceneSelection()
 {
@@ -80,9 +83,6 @@ bool ResetScene()
     }
     else
         messageBoxCallback = null;
-        
-    // Clear stored script attributes
-    scriptAttributes.Clear();
 
     suppressSceneChanges = true;
 
@@ -197,9 +197,6 @@ bool LoadScene(const String&in fileName)
         MessageBox("Could not open file.\n" + fileName);
         return false;
     }
-    
-    // Reset stored script attributes.
-    scriptAttributes.Clear();
 
     // Add the scene's resource path in case it's necessary
     String newScenePath = GetPath(fileName);
@@ -213,10 +210,12 @@ bool LoadScene(const String&in fileName)
 
     String extension = GetExtension(fileName);
     bool loaded;
-    if (extension != ".xml")
-        loaded = editorScene.Load(file);
-    else
+    if (extension == ".xml")
         loaded = editorScene.LoadXML(file);
+    else if (extension == ".json")
+        loaded = editorScene.LoadJSON(file);
+    else
+        loaded = editorScene.Load(file);
 
     // Release resources which are not used by the new scene
     cache.ReleaseAllResources(false);
@@ -227,6 +226,7 @@ bool LoadScene(const String&in fileName)
     UpdateWindowTitle();
     DisableInspectorLock();
     UpdateHierarchyItem(editorScene, true);
+    CollapseHierarchy();
     ClearEditActions();
 
     suppressSceneChanges = false;
@@ -241,9 +241,6 @@ bool LoadScene(const String&in fileName)
     CreateGizmo();
     CreateGrid();
     SetActiveViewport(viewports[0]);
-
-    // Store all ScriptInstance and LuaScriptInstance attributes
-    UpdateScriptInstances();
 
     return loaded;
 }
@@ -261,8 +258,17 @@ bool SaveScene(const String&in fileName)
     MakeBackup(fileName);
     File file(fileName, FILE_WRITE);
     String extension = GetExtension(fileName);
-    bool success = (extension != ".xml" ? editorScene.Save(file) : editorScene.SaveXML(file));
+    bool success;
+    if (extension == ".xml")
+        success = editorScene.SaveXML(file);
+    else if (extension == ".json")
+        success = editorScene.SaveJSON(file);
+    else
+        success = editorScene.Save(file);
     RemoveBackup(success, fileName);
+
+	// Save all the terrains we've modified
+	terrainEditor.Save();
 
     editorScene.updateEnabled = false;
 
@@ -286,15 +292,14 @@ bool SaveSceneWithExistingName()
         return SaveScene(editorScene.fileName);
 }
 
-Node@ CreateNode(CreateMode mode)
+Node@ CreateNode(CreateMode mode, bool raycastToMouse = false)
 {
     Node@ newNode = null;
     if (editNode !is null)
         newNode = editNode.CreateChild("", mode);
     else
         newNode = editorScene.CreateChild("", mode);
-    // Set the new node a certain distance from the camera
-    newNode.position = GetNewNodePosition();
+    newNode.worldPosition = GetNewNodePosition(raycastToMouse);
 
     // Create an undo action for the create
     CreateNodeAction action;
@@ -320,7 +325,7 @@ void CreateComponent(const String&in componentType)
     /// \todo Allow to specify the createmode
     for (uint i = 0; i < editNodes.length; ++i)
     {
-        Component@ newComponent = editNodes[i].CreateComponent(componentType, editNodes[i].id < FIRST_LOCAL_ID ? REPLICATED : LOCAL);
+        Component@ newComponent = editNodes[i].CreateComponent(componentType, editNodes[i].replicated ? REPLICATED : LOCAL);
         if (newComponent !is null)
         {
             // Some components such as CollisionShape do not create their internal object before the first call to ApplyAttributes()
@@ -350,7 +355,7 @@ void CreateLoadedComponent(Component@ component)
     FocusComponent(component);
 }
 
-Node@ LoadNode(const String&in fileName, Node@ parent = null)
+Node@ LoadNode(const String&in fileName, Node@ parent = null, bool raycastToMouse = false)
 {
     if (fileName.empty)
         return null;
@@ -373,11 +378,7 @@ Node@ LoadNode(const String&in fileName, Node@ parent = null)
     // Before instantiating, add object's resource path if necessary
     SetResourcePath(GetPath(fileName), true, true);
 
-    Ray cameraRay = camera.GetScreenRay(0.5, 0.5); // Get ray at view center
-    Vector3 position, normal;
-    GetSpawnPosition(cameraRay, newNodeDistance, position, normal, 0, true);
-
-    Node@ newNode = InstantiateNodeFromFile(file, position, Quaternion(), 1, parent, instantiateMode);
+    Node@ newNode = InstantiateNodeFromFile(file, GetNewNodePosition(raycastToMouse), Quaternion(), 1, parent, instantiateMode);
     if (newNode !is null)
     {
         FocusNode(newNode);
@@ -397,30 +398,23 @@ Node@ InstantiateNodeFromFile(File@ file, const Vector3& position, const Quatern
     suppressSceneChanges = true;
 
     String extension = GetExtension(file.name);
-    if (extension != ".xml")
-        newNode = editorScene.Instantiate(file, position, rotation, mode);
-    else
+    if (extension == ".xml")
         newNode = editorScene.InstantiateXML(file, position, rotation, mode);
+    else if (extension == ".json")
+        newNode = editorScene.InstantiateJSON(file, position, rotation, mode);
+    else
+        newNode = editorScene.Instantiate(file, position, rotation, mode);
 
     suppressSceneChanges = false;
 
     if (parent !is null)
         newNode.parent = parent;
-        
+
     if (newNode !is null)
     {
         newNode.scale = newNode.scale * scaleMod;
-        if (alignToAABBBottom)
-        {
-            Drawable@ drawable = GetFirstDrawable(newNode);
-            if (drawable !is null)
-            {
-                BoundingBox aabb = drawable.worldBoundingBox;
-                Vector3 aabbBottomCenter(aabb.center.x, aabb.min.y, aabb.center.z);
-                Vector3 offset = aabbBottomCenter - newNode.worldPosition;
-                newNode.worldPosition = newNode.worldPosition - offset;
-            }
-        }
+
+        AdjustNodePositionByAABB(newNode);
 
         // Create an undo action for the load
         CreateNodeAction action;
@@ -435,6 +429,21 @@ Node@ InstantiateNodeFromFile(File@ file, const Vector3& position, const Quatern
     }
 
     return newNode;
+}
+
+void AdjustNodePositionByAABB(Node@ newNode)
+{
+    if (alignToAABBBottom)
+    {
+        Drawable@ drawable = GetFirstDrawable(newNode);
+        if (drawable !is null)
+        {
+            BoundingBox aabb = drawable.worldBoundingBox;
+            Vector3 aabbBottomCenter(aabb.center.x, aabb.min.y, aabb.center.z);
+            Vector3 offset = aabbBottomCenter - newNode.worldPosition;
+            newNode.worldPosition = newNode.worldPosition - offset;
+        }
+    }
 }
 
 bool SaveNode(const String&in fileName)
@@ -453,7 +462,13 @@ bool SaveNode(const String&in fileName)
     }
 
     String extension = GetExtension(fileName);
-    bool success = (extension != ".xml" ? editNode.Save(file) : editNode.SaveXML(file));
+    bool success;
+    if (extension == ".xml")
+        success = editNode.SaveXML(file);
+    else if (extension == ".json")
+        success = editNode.SaveJSON(file);
+    else
+        success = editNode.Save(file);
     RemoveBackup(success, fileName);
 
     if (success)
@@ -481,7 +496,7 @@ void StopSceneUpdate()
     {
         suppressSceneChanges = true;
         editorScene.Clear();
-        editorScene.LoadXML(revertData.GetRoot());
+        editorScene.LoadXML(revertData.root);
         CreateGrid();
         UpdateHierarchyItem(editorScene, true);
         ClearEditActions();
@@ -517,6 +532,14 @@ bool ToggleSceneUpdate()
     else
         StopSceneUpdate();
     return true;
+}
+
+bool ShowLayerMover()
+{
+    if (ui.focusElement is null)
+        return ShowLayerEditor();
+    else
+        return false;
 }
 
 void SetSceneModified()
@@ -618,11 +641,11 @@ bool SceneCopy()
             XMLFile@ xml = XMLFile();
             XMLElement rootElem = xml.CreateRoot("component");
             selectedComponents[i].SaveXML(rootElem);
-            rootElem.SetBool("local", selectedComponents[i].id >= FIRST_LOCAL_ID);
+            rootElem.SetBool("local", !selectedComponents[i].replicated);
             sceneCopyBuffer.Push(xml);
         }
     }
-    // Copy nodes.
+    // Copy nodes
     else
     {
         for (uint i = 0; i < selectedNodes.length; ++i)
@@ -634,7 +657,7 @@ bool SceneCopy()
             XMLFile@ xml = XMLFile();
             XMLElement rootElem = xml.CreateRoot("node");
             selectedNodes[i].SaveXML(rootElem);
-            rootElem.SetBool("local", selectedNodes[i].id >= FIRST_LOCAL_ID);
+            rootElem.SetBool("local", !selectedNodes[i].replicated);
             sceneCopyBuffer.Push(xml);
         }
     }
@@ -682,8 +705,8 @@ bool ScenePaste(bool pasteRoot = false, bool duplication = false)
                 newNode = editorScene.CreateChild("", rootElem.GetBool("local") ? LOCAL : REPLICATED);
             else
             {
-                // If we are duplicating, paste into the selected nodes parent
-                if (duplication)
+                // If we are duplicating or have the original node selected, paste into the selected nodes parent
+                if (duplication || editNode is null || editNode.id == rootElem.GetUInt("id"))
                 {
                     if (editNode !is null && editNode.parent !is null)
                         newNode = editNode.parent.CreateChild("", rootElem.GetBool("local") ? LOCAL : REPLICATED);
@@ -767,6 +790,134 @@ bool SceneUnparent()
     return true;
 }
 
+bool NodesParentToLastSelected()
+{
+    if (lastSelectedNode.Get() is null)
+        return false;
+
+    if (!CheckHierarchyWindowFocus() || !selectedComponents.empty || selectedNodes.empty)
+        return false;
+
+    ui.cursor.shape = CS_BUSY;
+
+    // Group for storing undo actions
+    EditActionGroup group;
+
+    // Parent selected nodes to root
+    Array<Node@> changedNodes;
+
+    // Find new parent node it selected last
+    Node@ lastNode = lastSelectedNode.Get(); //GetListNode(hierarchyList.selection);
+
+    for (uint i = 0; i < selectedNodes.length; ++i)
+    {
+
+        Node@ sourceNode = selectedNodes[i];
+        if ( sourceNode.id == lastNode.id)
+            continue; // Skip last node it is parent
+
+        if (sourceNode.parent.id == lastNode.id)
+            continue; // Root or already parented to root
+
+        // Perform the reparenting, continue loop even if action fails
+        ReparentNodeAction action;
+        action.Define(sourceNode, lastNode);
+        group.actions.Push(action);
+
+        SceneChangeParent(sourceNode, lastNode, false);
+        changedNodes.Push(sourceNode);
+    }
+
+    // Reselect the changed nodes at their new position in the list
+    for (uint i = 0; i < changedNodes.length; ++i)
+        hierarchyList.AddSelection(GetListIndex(changedNodes[i]));
+
+    SaveEditActionGroup(group);
+    SetSceneModified();
+
+    return true;
+}
+
+bool SceneSmartDuplicateNode()
+{
+    const float minOffset = 0.1;
+
+    if (!CheckHierarchyWindowFocus() || !selectedComponents.empty
+        || selectedNodes.empty || lastSelectedNode.Get() is null)
+        return false;
+
+
+    Node@ node = lastSelectedNode.Get();
+    Node@ parent = node.parent;
+    Vector3 offset = Vector3(1,0,0); // default offset
+
+    if (parent is editorScene) // if parent of selected node is Scene make empty parent for it and place in same position;
+    {
+        parent = CreateNode(LOCAL);
+        SceneChangeParent(parent, editorScene, false);
+        parent.worldPosition = node.worldPosition;
+        parent.name = node.name + "Group";
+        node.name = parent.name + "Instance" + String(parent.numChildren);
+        SceneChangeParent(node, parent, false);
+        parent = node.parent;
+        SelectNode(node, false);
+    }
+
+    Vector3 size;
+    BoundingBox bb;
+
+    // get bb for offset
+    Drawable@ drawable = GetFirstDrawable(node);
+    if (drawable !is null)
+    {
+        bb = drawable.boundingBox;
+        size =  bb.size * drawable.node.worldScale;
+        offset = Vector3(size.x, 0, 0);
+    }
+
+    // make offset on axis that select user by mouse
+    if (gizmoAxisX.selected)
+    {
+        if (size.x < minOffset) size.x = minOffset;
+        offset = node.worldRotation * Vector3(size.x,0,0);
+    }
+    else if (gizmoAxisY.selected)
+    {
+        if (size.y < minOffset) size.y = minOffset;
+        offset = node.worldRotation * Vector3(0,size.y,0);
+    }
+    else if (gizmoAxisZ.selected)
+    {
+        if (size.z < minOffset) size.z = minOffset;
+        offset = node.worldRotation * Vector3(0,0,size.z);
+    }
+    else
+        offset = lastOffsetForSmartDuplicate;
+
+    Vector3 lastInstancePosition = node.worldPosition;
+
+    SelectNode(node, false);
+    SceneDuplicate();
+    Node@ newInstance = parent.children[parent.numChildren-1];
+    SelectNode(newInstance, false);
+    newInstance.worldPosition = lastInstancePosition;
+    newInstance.Translate(offset, TS_WORLD);
+    newInstance.name = parent.name + "Instance" + String(parent.numChildren-1);
+
+    lastOffsetForSmartDuplicate = offset;
+    UpdateNodeAttributes();
+    return true;
+}
+
+bool ViewCloser()
+{
+    if (selectedNodes.length > 0 || selectedNodes.length > 0)
+        LocateNodesAndComponents(selectedNodes, selectedComponents);
+
+    return true;
+}
+
+
 bool SceneToggleEnable()
 {
     if (!CheckHierarchyWindowFocus())
@@ -803,6 +954,60 @@ bool SceneToggleEnable()
             // Create undo action
             EditAttributeAction action;
             action.Define(selectedComponents[i], 0, Variant(oldEnabled));
+            group.actions.Push(action);
+        }
+    }
+
+    SaveEditActionGroup(group);
+    SetSceneModified();
+
+    return true;
+}
+
+bool SceneEnableAllNodes()
+{
+    if (!CheckHierarchyWindowFocus())
+        return false;
+
+    ui.cursor.shape = CS_BUSY;
+
+    EditActionGroup group;
+
+    // Toggle enabled state of nodes recursively
+    Array<Node@> allNodes;
+    allNodes = editorScene.GetChildren(true);
+
+    for (uint i = 0; i < allNodes.length; ++i)
+    {
+        // Do not attempt to disable the Scene
+        if (allNodes[i].typeName == "Node")
+        {
+            bool oldEnabled = allNodes[i].enabled;
+            if (oldEnabled == false)
+              allNodes[i].SetEnabledRecursive(true);
+
+            // Create undo action
+            ToggleNodeEnabledAction action;
+            action.Define(allNodes[i], oldEnabled);
+            group.actions.Push(action);
+        }
+    }
+
+    Array<Component@> allComponents;
+    allComponents = editorScene.GetComponents();
+
+    for (uint i = 0; i < allComponents.length; ++i)
+    {
+        // Some components purposefully do not expose the Enabled attribute, and it does not affect them in any way
+        // (Octree, PhysicsWorld). Check that the first attribute is in fact called "Is Enabled"
+        if (allComponents[i].numAttributes > 0 && allComponents[i].attributeInfos[0].name == "Is Enabled")
+        {
+            bool oldEnabled = allComponents[i].enabled;
+            allComponents[i].enabled = true;
+
+            // Create undo action
+            EditAttributeAction action;
+            action.Define(allComponents[i], 0, Variant(oldEnabled));
             group.actions.Push(action);
         }
     }
@@ -863,6 +1068,88 @@ bool SceneChangeParent(Node@ sourceNode, Array<Node@> sourceNodes, Node@ targetN
         return false;
 }
 
+bool SceneReorder(Node@ sourceNode, Node@ targetNode)
+{
+    if (sourceNode is null || targetNode is null || sourceNode.parent is null || sourceNode.parent !is targetNode.parent)
+        return false;
+    if (sourceNode is targetNode)
+        return true; // No-op
+
+    Node@ parent = sourceNode.parent;
+    uint destIndex = SceneFindChildIndex(parent, targetNode);
+
+    ReorderNodeAction action;
+    action.Define(sourceNode, destIndex);
+    SaveEditAction(action);
+    PerformReorder(parent, sourceNode, destIndex);
+    return true;
+}
+
+bool SceneReorder(Component@ sourceComponent, Component@ targetComponent)
+{
+    if (sourceComponent is null || targetComponent is null || sourceComponent.node !is targetComponent.node)
+        return false;
+    if (sourceComponent is targetComponent)
+        return true; // No-op
+
+    Node@ node = sourceComponent.node;
+    uint destIndex = SceneFindComponentIndex(node, targetComponent);
+
+    ReorderComponentAction action;
+    action.Define(sourceComponent, destIndex);
+    SaveEditAction(action);
+    PerformReorder(node, sourceComponent, destIndex);
+    return true;
+}
+
+void PerformReorder(Node@ parent, Node@ child, uint destIndex)
+{
+    suppressSceneChanges = true;
+
+    // Removal from scene zeroes the ID. Be prepared to restore it
+    uint oldId = child.id;
+    parent.RemoveChild(child);
+    child.id = oldId;
+    parent.AddChild(child, destIndex);
+    UpdateHierarchyItem(parent); // Force update to make sure the order is current
+    SetSceneModified();
+
+    suppressSceneChanges = false;
+}
+
+void PerformReorder(Node@ node, Component@ component, uint destIndex)
+{
+    suppressSceneChanges = true;
+
+    node.ReorderComponent(component, destIndex);
+    UpdateHierarchyItem(node); // Force update to make sure the order is current
+    SetSceneModified();
+
+    suppressSceneChanges = false;
+}
+
+uint SceneFindChildIndex(Node@ parent, Node@ child)
+{
+    for (uint i = 0; i < parent.numChildren; ++i)
+    {
+        if (parent.children[i] is child)
+            return i;
+    }
+
+    return -1;
+}
+
+uint SceneFindComponentIndex(Node@ node, Component@ component)
+{
+    for (uint i = 0; i < node.numComponents; ++i)
+    {
+        if (node.components[i] is component)
+            return i;
+    }
+
+    return -1;
+}
+
 bool SceneResetPosition()
 {
     if (editNode !is null)
@@ -914,6 +1201,30 @@ bool SceneResetScale()
         Transform oldTransform;
         oldTransform.Define(editNode);
 
+        editNode.scale = Vector3(1.0, 1.0, 1.0);
+
+        // Create undo action
+        EditNodeTransformAction action;
+        action.Define(editNode, oldTransform);
+        SaveEditAction(action);
+        SetSceneModified();
+
+        UpdateNodeAttributes();
+        return true;
+    }
+    else
+        return false;
+}
+
+bool SceneResetTransform()
+{
+    if (editNode !is null)
+    {
+        Transform oldTransform;
+        oldTransform.Define(editNode);
+
+        editNode.position = Vector3(0.0, 0.0, 0.0);
+        editNode.rotation = Quaternion();
         editNode.scale = Vector3(1.0, 1.0, 1.0);
 
         // Create undo action
@@ -998,8 +1309,12 @@ bool SceneRebuildNavigation()
     Array<Component@>@ navMeshes = editorScene.GetComponents("NavigationMesh", true);
     if (navMeshes.empty)
     {
-        MessageBox("No NavigationMesh components in the scene, nothing to rebuild.");
-        return false;
+        @navMeshes = editorScene.GetComponents("DynamicNavigationMesh", true);
+        if (navMeshes.empty)
+        {
+            MessageBox("No NavigationMesh components in the scene, nothing to rebuild.");
+            return false;
+        }
     }
 
     bool success = true;
@@ -1011,6 +1326,118 @@ bool SceneRebuildNavigation()
     }
 
     return success;
+}
+
+bool SceneRenderZoneCubemaps()
+{
+    bool success = false;
+    Array<Zone@> capturedThisCall;
+    bool alreadyCapturing = activeCubeCapture.length > 0; // May have managed to quickly queue up a second round of zones to render cubemaps for
+
+    for (uint i = 0; i < selectedNodes.length; ++i)
+    {
+        Array<Component@>@ zones = selectedNodes[i].GetComponents("Zone", true);
+        for (uint z = 0; z < zones.length; ++z)
+        {
+            Zone@ zone = cast<Zone>(zones[z]);
+            if (zone !is null)
+            {
+                activeCubeCapture.Push(EditorCubeCapture(zone));
+                capturedThisCall.Push(zone);
+            }
+        }
+    }
+
+    for (uint i = 0; i < selectedComponents.length; ++i)
+    {
+        Zone@ zone = cast<Zone>(selectedComponents[i]);
+        if (zone !is null)
+        {
+            if (capturedThisCall.FindByRef(zone) < 0)
+            {
+                activeCubeCapture.Push(EditorCubeCapture(zone));
+                capturedThisCall.Push(zone);
+            }
+        }
+    }
+
+    // Start rendering cubemaps if there are any to render and the queue isn't already running
+    if (activeCubeCapture.length > 0 && !alreadyCapturing)
+        activeCubeCapture[0].Start();
+
+    if (capturedThisCall.length <= 0)
+    {
+        MessageBox("No zones selected to render cubemaps for/");
+    }
+    return capturedThisCall.length > 0;
+}
+
+bool SceneAddChildrenStaticModelGroup()
+{
+    StaticModelGroup@ smg = cast<StaticModelGroup>(editComponents.length > 0 ? editComponents[0] : null);
+    if (smg is null && editNode !is null)
+        smg = editNode.GetComponent("StaticModelGroup");
+
+    if (smg is null)
+    {
+        MessageBox("Must have a StaticModelGroup component selected.");
+        return false;
+    }
+
+    uint attrIndex = GetAttributeIndex(smg, "Instance Nodes");
+    Variant oldValue = smg.attributes[attrIndex];
+
+    Array<Node@> children = smg.node.GetChildren(true);
+    for (uint i = 0; i < children.length; ++i)
+        smg.AddInstanceNode(children[i]);
+
+    EditAttributeAction action;
+    action.Define(smg, attrIndex, oldValue);
+    SaveEditAction(action);
+    SetSceneModified();
+    FocusComponent(smg);
+
+    return true;
+}
+
+bool SceneSetChildrenSplinePath(bool makeCycle)
+{
+    SplinePath@ sp = cast<SplinePath>(editComponents.length > 0 ? editComponents[0] : null);
+    if (sp is null && editNode !is null)
+        sp = editNode.GetComponent("SplinePath");
+
+    if (sp is null)
+    {
+        MessageBox("Must have a SplinePath component selected.");
+        return false;
+    }
+
+    uint attrIndex = GetAttributeIndex(sp, "Control Points");
+    Variant oldValue = sp.attributes[attrIndex];
+
+    Array<Node@> children = sp.node.GetChildren(true);
+    if (children.length >= 2)
+    {
+        sp.ClearControlPoints();
+        for (uint i = 0; i < children.length; ++i)
+            sp.AddControlPoint(children[i]);
+    }
+    else
+    {
+        MessageBox("You must have a minimum two children Nodes in selected Node.");
+        return false;
+    }
+
+    if (makeCycle)
+        sp.AddControlPoint(children[0]);
+
+    EditAttributeAction action;
+    action.Define(sp, attrIndex, oldValue);
+    SaveEditAction(action);
+    SetSceneModified();
+    FocusComponent(sp);
+
+    return true;
 }
 
 void AssignMaterial(StaticModel@ model, String materialPath)
@@ -1061,7 +1488,7 @@ Drawable@ GetFirstDrawable(Node@ node)
                 return drawable;
         }
     }
-    
+
     return null;
 }
 
@@ -1078,7 +1505,7 @@ void AssignModel(StaticModel@ assignee, String modelPath)
     action.Define(assignee, oldModel, model);
     SaveEditAction(action);
     SetSceneModified();
-    FocusComponent(assignee); 
+    FocusComponent(assignee);
 }
 
 void CreateModelWithStaticModel(String filepath, Node@ parent)
@@ -1095,6 +1522,8 @@ void CreateModelWithStaticModel(String filepath, Node@ parent)
 
     StaticModel@ staticModel = parent.GetOrCreateComponent("StaticModel");
     staticModel.model = model;
+    if (applyMaterialList)
+        staticModel.ApplyMaterialList();
     CreateLoadedComponent(staticModel);
 }
 
@@ -1112,5 +1541,124 @@ void CreateModelWithAnimatedModel(String filepath, Node@ parent)
 
     AnimatedModel@ animatedModel = parent.GetOrCreateComponent("AnimatedModel");
     animatedModel.model = model;
+    if (applyMaterialList)
+        animatedModel.ApplyMaterialList();
     CreateLoadedComponent(animatedModel);
 }
+
+bool ColorWheelSetupBehaviorForColoring()
+{
+    Menu@ menu = GetEventSender();
+    if (menu is null)
+        return false;
+
+    coloringPropertyName = menu.name;
+
+    if (coloringPropertyName == "menuCancel") return false;
+
+    if (coloringComponent.typeName == "Light")
+    {
+        Light@ light = cast<Light>(coloringComponent);
+        if (light !is null)
+        {
+            if (coloringPropertyName == "menuLightColor")
+            {
+                coloringOldColor = light.color;
+                ShowColorWheelWithColor(coloringOldColor);
+            }
+            else if (coloringPropertyName == "menuSpecularIntensity")
+            {
+               // ColorWheel have only 0-1 range output of V-value(BW), and for huge-range values we divide in and multiply out
+               float scaledSpecular = light.specularIntensity * 0.1f;
+               coloringOldScalar = scaledSpecular;
+               ShowColorWheelWithColor(Color(scaledSpecular,scaledSpecular,scaledSpecular));
+
+            }
+            else if (coloringPropertyName == "menuBrightnessMultiplier")
+            {
+               float scaledBrightness = light.brightness * 0.1f;
+               coloringOldScalar = scaledBrightness;
+               ShowColorWheelWithColor(Color(scaledBrightness,scaledBrightness,scaledBrightness));
+            }
+        }
+    }
+    else if (coloringComponent.typeName == "StaticModel")
+    {
+        StaticModel@ model  = cast<StaticModel>(coloringComponent);
+        if (model !is null)
+        {
+            Material@ mat = model.materials[0];
+            if (mat !is null)
+            {
+                if (coloringPropertyName == "menuDiffuseColor")
+                {
+                    Variant oldValue = mat.shaderParameters["MatDiffColor"];
+                    Array<String> values = oldValue.ToString().Split(' ');
+                    coloringOldColor = Color(values[0].ToFloat(),values[1].ToFloat(),values[2].ToFloat(),values[3].ToFloat()); //RGBA
+                    ShowColorWheelWithColor(coloringOldColor);
+                }
+                else if (coloringPropertyName == "menuSpecularColor")
+                {
+                    Variant oldValue = mat.shaderParameters["MatSpecColor"];
+                    Array<String> values = oldValue.ToString().Split(' ');
+                    coloringOldColor = Color(values[0].ToFloat(),values[1].ToFloat(),values[2].ToFloat());
+                    coloringOldScalar = values[3].ToFloat();
+                    ShowColorWheelWithColor(Color(coloringOldColor.r, coloringOldColor.g, coloringOldColor.b, coloringOldScalar/128.0f)); //RGB + shine
+                }
+                else if (coloringPropertyName == "menuEmissiveColor")
+                {
+                    Variant oldValue = mat.shaderParameters["MatEmissiveColor"];
+                    Array<String> values = oldValue.ToString().Split(' ');
+                    coloringOldColor = Color(values[0].ToFloat(),values[1].ToFloat(),values[2].ToFloat()); // RGB
+
+
+                    ShowColorWheelWithColor(coloringOldColor);
+                }
+                else if (coloringPropertyName == "menuEnvironmentMapColor")
+                {
+                    Variant oldValue = mat.shaderParameters["MatEnvMapColor"];
+                    Array<String> values = oldValue.ToString().Split(' ');
+                    coloringOldColor = Color(values[0].ToFloat(),values[1].ToFloat(),values[2].ToFloat()); //RGB
+
+                    ShowColorWheelWithColor(coloringOldColor);
+                }
+            }
+        }
+    }
+    else if (coloringComponent.typeName == "Zone")
+    {
+        Zone@ zone  = cast<Zone>(coloringComponent);
+        if (zone !is null)
+        {
+            if (coloringPropertyName == "menuAmbientColor")
+            {
+                coloringOldColor = zone.ambientColor;
+            }
+            else if (coloringPropertyName == "menuFogColor")
+            {
+                coloringOldColor = zone.fogColor;
+            }
+
+            ShowColorWheelWithColor(coloringOldColor);
+        }
+    }
+    else if (coloringComponent.typeName == "Text3D")
+    {
+        Text3D@ txt = cast<Text3D>(coloringComponent);
+        if (txt !is null)
+        {
+            if (coloringPropertyName == "c" || coloringPropertyName == "tl")
+                coloringOldColor = txt.colors[C_TOPLEFT];
+            else if (coloringPropertyName == "tr")
+                coloringOldColor = txt.colors[C_TOPRIGHT];
+            else if (coloringPropertyName == "bl")
+                coloringOldColor = txt.colors[C_BOTTOMLEFT];
+            else if (coloringPropertyName == "br")
+                coloringOldColor = txt.colors[C_BOTTOMRIGHT];
+
+            ShowColorWheelWithColor(coloringOldColor);
+        }
+    }
+    return true;
+}
+

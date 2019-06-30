@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,22 +22,22 @@
 
 #pragma once
 
+#include "../Math/Vector2.h"
+#include "../Input/InputConstants.h"
+#include "../Resource/XMLFile.h"
 #include "../Scene/Animatable.h"
 #include "../UI/UIBatch.h"
-#include "../Math/Vector2.h"
-#include "../Resource/XMLFile.h"
 
 namespace Urho3D
 {
-
-const Color DEBUG_DRAW_COLOR(Color::BLUE);
 
 /// %UI element horizontal alignment.
 enum HorizontalAlignment
 {
     HA_LEFT = 0,
     HA_CENTER,
-    HA_RIGHT
+    HA_RIGHT,
+    HA_CUSTOM
 };
 
 /// %UI element vertical alignment.
@@ -45,7 +45,8 @@ enum VerticalAlignment
 {
     VA_TOP = 0,
     VA_CENTER,
-    VA_BOTTOM
+    VA_BOTTOM,
+    VA_CUSTOM
 };
 
 /// %UI element corners.
@@ -92,48 +93,52 @@ enum LayoutMode
 /// Traversal mode for rendering.
 enum TraversalMode
 {
-    /// Traverse thru children having same priority first and recurse into their children before traversing children having higher priority.
+    /// Traverse through children having same priority first and recurse into their children before traversing children having higher priority.
     TM_BREADTH_FIRST = 0,
-    /// Traverse thru each child and its children immediately after in sequence.
+    /// Traverse through each child and its children immediately after in sequence.
     TM_DEPTH_FIRST
 };
 
-/// Drag and drop disabled.
-static const unsigned DD_DISABLED = 0x0;
-/// Drag and drop source flag.
-static const unsigned DD_SOURCE = 0x1;
-/// Drag and drop target flag.
-static const unsigned DD_TARGET = 0x2;
-/// Drag and drop source and target.
-static const unsigned DD_SOURCE_AND_TARGET = 0x3;
+enum DragAndDropMode : unsigned
+{
+    /// Drag and drop disabled.
+    DD_DISABLED = 0x0,
+    /// Drag and drop source flag.
+    DD_SOURCE = 0x1,
+    /// Drag and drop target flag.
+    DD_TARGET = 0x2,
+    /// Drag and drop source and target.
+    DD_SOURCE_AND_TARGET = 0x3,
+};
+URHO3D_FLAGSET(DragAndDropMode, DragAndDropModeFlags);
 
 class Cursor;
 class ResourceCache;
+class Texture2D;
 
 /// Base class for %UI elements.
 class URHO3D_API UIElement : public Animatable
 {
-    OBJECT(UIElement);
-    BASEOBJECT(UIElement);
+    URHO3D_OBJECT(UIElement, Animatable);
 
 public:
     /// Construct.
-    UIElement(Context* context);
+    explicit UIElement(Context* context);
     /// Destruct.
-    virtual ~UIElement();
+    ~UIElement() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Apply attribute changes that can not be applied immediately.
-    virtual void ApplyAttributes();
+    void ApplyAttributes() override;
     /// Load from XML data. Return true if successful.
-    virtual bool LoadXML(const XMLElement& source, bool setInstanceDefault = false);
+    bool LoadXML(const XMLElement& source) override;
     /// Load from XML data with style. Return true if successful.
-    virtual bool LoadXML(const XMLElement& source, XMLFile* styleFile, bool setInstanceDefault = false);
-    /// Create a child by loading from XML data with style. Return true if successful.
-    virtual bool LoadChildXML(const XMLElement& childElem, XMLFile* styleFile = 0, bool setInstanceDefault = false);
+    virtual bool LoadXML(const XMLElement& source, XMLFile* styleFile);
+    /// Create a child by loading from XML data with style. Returns the child element if successful, null if otherwise.
+    virtual UIElement* LoadChildXML(const XMLElement& childElem, XMLFile* styleFile);
     /// Save as XML data. Return true if successful.
-    virtual bool SaveXML(XMLElement& dest) const;
+    bool SaveXML(XMLElement& dest) const override;
 
     /// Perform UI element update.
     virtual void Update(float timeStep);
@@ -148,37 +153,58 @@ public:
     /// React to mouse hover.
     virtual void OnHover(const IntVector2& position, const IntVector2& screenPosition, int buttons, int qualifiers, Cursor* cursor);
     /// React to mouse click begin.
-    virtual void OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor);
+    virtual void OnClickBegin
+        (const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor) { }
     /// React to mouse click end.
-    virtual void OnClickEnd(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor, UIElement* beginElement);
+    virtual void OnClickEnd
+        (const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor,
+            UIElement* beginElement) { }
     /// React to double mouse click.
-    virtual void OnDoubleClick(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor);
+    virtual void OnDoubleClick
+        (const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor) { }
     /// React to mouse drag begin.
-    virtual void OnDragBegin(const IntVector2& position, const IntVector2& screenPosition, int buttons, int qualifiers, Cursor* cursor);
+    virtual void
+        OnDragBegin(const IntVector2& position, const IntVector2& screenPosition, int buttons, int qualifiers, Cursor* cursor);
     /// React to mouse drag motion.
-    virtual void OnDragMove(const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons, int qualifiers, Cursor* cursor);
+    virtual void OnDragMove
+        (const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons, int qualifiers,
+            Cursor* cursor);
     /// React to mouse drag end.
-    virtual void OnDragEnd(const IntVector2& position, const IntVector2& screenPosition, int dragButtons, int releaseButton, Cursor* cursor);
+    virtual void
+        OnDragEnd(const IntVector2& position, const IntVector2& screenPosition, int dragButtons, int releaseButton, Cursor* cursor);
     /// React to a mouse drag cancel event (ie, when an extra button is pressed)
-    virtual void OnDragCancel(const IntVector2& position, const IntVector2& screenPosition, int dragButtons, int cancelButton, Cursor* cursor);
+    virtual void OnDragCancel
+        (const IntVector2& position, const IntVector2& screenPosition, int dragButtons, int cancelButton, Cursor* cursor);
     /// React to drag and drop test. Return true to signal that the drop is acceptable.
     virtual bool OnDragDropTest(UIElement* source);
     /// React to drag and drop finish. Return true to signal that the drop was accepted.
     virtual bool OnDragDropFinish(UIElement* source);
     /// React to mouse wheel.
-    virtual void OnWheel(int delta, int buttons, int qualifiers);
+    virtual void OnWheel(int delta, MouseButtonFlags buttons, QualifierFlags qualifiers) { }
     /// React to a key press.
-    virtual void OnKey(int key, int buttons, int qualifiers);
+    virtual void OnKey(Key key, MouseButtonFlags buttons, QualifierFlags qualifiers) { }
     /// React to text input event.
-    virtual void OnTextInput(const String& text, int buttons, int qualifiers);
+    virtual void OnTextInput(const String& text) { }
+
     /// React to resize.
-    virtual void OnResize() {}
+    virtual void OnResize(const IntVector2& newSize, const IntVector2& delta) { }
+
     /// React to position change.
-    virtual void OnPositionSet() {}
+    virtual void OnPositionSet(const IntVector2& newPosition) { }
+
     /// React to editable status change.
-    virtual void OnSetEditable() {}
+    virtual void OnSetEditable() { }
+
     /// React to indent change.
-    virtual void OnIndentSet() {}
+    virtual void OnIndentSet() { }
+
+    /// Convert screen coordinates to element coordinates.
+    virtual IntVector2 ScreenToElement(const IntVector2& screenPosition);
+    /// Convert element coordinates to screen coordinates.
+    virtual IntVector2 ElementToScreen(const IntVector2& position);
+
+    /// Return whether the element could handle wheel input.
+    virtual bool IsWheelHandler() const { return false; }
 
     /// Load from an XML file. Return true if successful.
     bool LoadXML(Deserializer& source);
@@ -231,6 +257,24 @@ public:
     void SetHorizontalAlignment(HorizontalAlignment align);
     /// Set vertical alignment.
     void SetVerticalAlignment(VerticalAlignment align);
+    /// Enable automatic positioning & sizing of the element relative to its parent using min/max anchor and min/max offset. Default false.
+    void SetEnableAnchor(bool enable);
+    /// Set minimum (top left) anchor in relation to the parent element (from 0 to 1.) No effect when anchor is not enabled.
+    void SetMinAnchor(const Vector2& anchor);
+    /// Set minimum anchor.
+    void SetMinAnchor(float x, float y);
+    /// Set maximum (bottom right) anchor in relation to the parent element (from 0 to 1.) No effect when anchor is not enabled.
+    void SetMaxAnchor(const Vector2& anchor);
+    /// Set maximum anchor.
+    void SetMaxAnchor(float x, float y);
+    /// Set offset of element's top left from the minimum anchor in pixels. No effect when anchor is not enabled.
+    void SetMinOffset(const IntVector2& offset);
+    /// Set offset of element's bottom right from the maximum anchor in pixels. No effect when anchor is not enabled.
+    void SetMaxOffset(const IntVector2& offset);
+    /// Set pivot relative to element's size (from 0 to 1, where 0.5 is center.) Overrides horizontal & vertical alignment.
+    void SetPivot(const Vector2& pivot);
+    /// Set pivot relative to element's size (from 0 to 1, where 0.5 is center.) Overrides horizontal & vertical alignment.
+    void SetPivot(float x, float y);
     /// Set child element clipping border.
     void SetClipBorder(const IntRect& rect);
     /// Set color on all corners.
@@ -265,21 +309,21 @@ public:
     void SetFocus(bool enable);
     /// Set selected mode. Actual meaning is element dependent, for example constant hover or pressed effect.
     void SetSelected(bool enable);
-    /// Set whether is visible.
+    /// Set whether is visible. Visibility propagates to child elements.
     void SetVisible(bool enable);
     /// Set focus mode.
     void SetFocusMode(FocusMode mode);
     /// Set drag and drop flags.
-    void SetDragDropMode(unsigned mode);
-    /// Set style from an XML file. Find the style element by name. If the style file is not explicitly provided, use the default style from parental chain. Return true if the style is applied successfully.
-    bool SetStyle(const String& styleName, XMLFile* file = 0);
+    void SetDragDropMode(DragAndDropModeFlags mode);
+    /// Set style from an XML file. Find the style element by name. If the style file is not explicitly provided, use the default style from parental chain. Return true if the style is applied successfully. See also \ref UI_Programmatic.
+    bool SetStyle(const String& styleName, XMLFile* file = nullptr);
     /// Set style from an XML element. Return true if the style is applied successfully.
     bool SetStyle(const XMLElement& element);
-    /// Set style from an XML file. Find the style element automatically. If the style file is not explicitly provided, use the default style from parental chain. Return true if the style is applied successfully.
-    bool SetStyleAuto(XMLFile* file = 0);
+    /// Set style from an XML file. Find the style element automatically by using the element's typename. If the style file is not explicitly provided, use the default style from parental chain. Return true if the style is applied successfully. See also \ref UI_Programmatic.
+    bool SetStyleAuto(XMLFile* file = nullptr);
     /// Set default style file for later use by children elements.
     void SetDefaultStyle(XMLFile* style);
-    /// Set layout.
+    /// Set layout parameters.
     void SetLayout(LayoutMode mode, int spacing = 0, const IntRect& border = IntRect::ZERO);
     /// Set layout mode only.
     void SetLayoutMode(LayoutMode mode);
@@ -328,97 +372,189 @@ public:
     /// Set element event sender flag. When child element is added or deleted, the event would be sent using UIElement found in the parental chain having this flag set. If not set, the event is sent using UI's root as per normal.
     void SetElementEventSender(bool flag);
 
+    /// Set tags. Old tags are overwritten.
+    void SetTags(const StringVector& tags);
+    /// Add a tag.
+    void AddTag(const String& tag);
+    /// Add tags with the specified separator, by default ;
+    void AddTags(const String& tags, char separator = ';');
+    /// Add tags.
+    void AddTags(const StringVector& tags);
+    /// Remove specific tag. Return true if existed.
+    bool RemoveTag(const String& tag);
+    /// Remove all tags.
+    void RemoveAllTags();
+
     /// Template version of creating a child element.
     template <class T> T* CreateChild(const String& name = String::EMPTY, unsigned index = M_MAX_UNSIGNED);
+    /// Template version of returning child element by index using static cast.
+    template <class T> T* GetChildStaticCast(unsigned index) const;
+    /// Template version of returning child element by name using static cast.
+    template <class T> T* GetChildStaticCast(const String& name, bool recursive = false) const;
+    /// Template version of returning child element by variable using static cast. If only key is provided, return the first child having the matching variable key. If value is also provided then the actual variable value would also be checked against.
+    template <class T> T* GetChildStaticCast(const StringHash& key, const Variant& value = Variant::EMPTY, bool recursive = false) const;
+    /// Template version of returning child element by index using dynamic cast. May return 0 when casting failed.
+    template <class T> T* GetChildDynamicCast(unsigned index) const;
+    /// Template version of returning child element by name using dynamic cast. May return 0 when casting failed.
+    template <class T> T* GetChildDynamicCast(const String& name, bool recursive = false) const;
+    /// Template version of returning child element by variable. If only key is provided, return the first child having the matching variable key. If value is also provided then the actual variable value would also be checked against using dynamic cast. May return 0 when casting failed.
+    template <class T> T* GetChildDynamicCast(const StringHash& key, const Variant& value = Variant::EMPTY, bool recursive = false) const;
 
     /// Return name.
     const String& GetName() const { return name_; }
+
     /// Return position.
     const IntVector2& GetPosition() const { return position_; }
+
     /// Return size.
     const IntVector2& GetSize() const { return size_; }
+
     /// Return width.
     int GetWidth() const { return size_.x_; }
+
     /// Return height.
     int GetHeight() const { return size_.y_; }
+
     /// Return minimum size.
     const IntVector2& GetMinSize() const { return minSize_; }
+
     /// Return minimum width.
     int GetMinWidth() const { return minSize_.x_; }
+
     /// Return minimum height.
     int GetMinHeight() const { return minSize_.y_; }
+
     /// Return maximum size.
     const IntVector2& GetMaxSize() const { return maxSize_; }
+
     /// Return minimum width.
     int GetMaxWidth() const { return maxSize_.x_; }
+
     /// Return minimum height.
     int GetMaxHeight() const { return maxSize_.y_; }
+
     /// Return true if size is fixed.
     bool IsFixedSize() const { return minSize_ == maxSize_; }
+
     /// Return true if width is fixed.
     bool IsFixedWidth() const { return minSize_.x_ == maxSize_.x_; }
+
     /// Return true if height is fixed.
     bool IsFixedHeight() const { return minSize_.y_ == maxSize_.y_; }
+
     /// Return child element offset.
     const IntVector2& GetChildOffset() const { return childOffset_; }
-    /// Return horizontal alignment.
-    HorizontalAlignment GetHorizontalAlignment() const { return horizontalAlignment_; }
-    /// Return vertical alignment.
-    VerticalAlignment GetVerticalAlignment() const { return verticalAlignment_; }
+
+    /// Return horizontal alignment. If pivot has been adjusted to a custom horizontal setting, returns HA_CUSTOM.
+    HorizontalAlignment GetHorizontalAlignment() const;
+
+    /// Return vertical alignment. If pivot has been adjusted to a custom vertical setting, returns VA_CUSTOM.
+    VerticalAlignment GetVerticalAlignment() const;
+
+    /// Return whether anchor positioning & sizing is enabled.
+    bool GetEnableAnchor() const { return enableAnchor_; }
+
+    /// Return minimum anchor.
+    const Vector2& GetMinAnchor() const { return anchorMin_; }
+
+    /// Return maximum anchor.
+    const Vector2& GetMaxAnchor() const { return anchorMax_; }
+
+    // Return minimum offset.
+    const IntVector2& GetMinOffset() const { return minOffset_; }
+
+    // Return maximum offset.
+    const IntVector2& GetMaxOffset() const { return maxOffset_; }
+
+    /// Return pivot.
+    const Vector2& GetPivot() const { return pivot_; }
+
     /// Return child element clipping border.
     const IntRect& GetClipBorder() const { return clipBorder_; }
+
     /// Return corner color.
-    const Color& GetColor(Corner corner) const { return color_[corner]; }
+    const Color& GetColor(Corner corner) const { return colors_[corner]; }
+
     /// Return priority.
     int GetPriority() const { return priority_; }
+
     /// Return opacity.
     float GetOpacity() const { return opacity_; }
+
     /// Return derived opacity (affected by parent elements.) If UseDerivedOpacity is false, returns same as element's own opacity.
     float GetDerivedOpacity() const;
+
     /// Return whether should be brought to front when focused.
     bool GetBringToFront() const { return bringToFront_; }
+
     /// Return whether should be put to background when another element is focused.
     bool GetBringToBack() const { return bringToBack_; }
+
     /// Return whether should clip child elements.
     bool GetClipChildren() const { return clipChildren_; }
+
     /// Return whether should sort child elements according to priority.
     bool GetSortChildren() const { return sortChildren_; }
+
     /// Return whether parent elements' opacity affects opacity.
     bool GetUseDerivedOpacity() const { return useDerivedOpacity_; }
+
     /// Return whether has focus.
     bool HasFocus() const;
+
+    /// Return whether is a direct or indirect child of specified element.
+    bool IsChildOf(UIElement* element) const;
+
     /// Return whether reacts to input.
     bool IsEnabled() const { return enabled_; }
+
     /// Returns the element's last own enabled state. May be different than the value returned by IsEnabled when SetDeepEnabled has been used.
     bool IsEnabledSelf() const { return enabledPrev_; }
+
     /// Return whether value is editable through input.
     bool IsEditable() const { return editable_; }
+
     /// Return whether is selected. Actual meaning is element dependent.
     bool IsSelected() const { return selected_; }
-    /// Return whether is visible.
+
+    /// Return whether element itself should be visible. Elements can be also hidden due to the parent being not visible, use IsVisibleEffective() to check.
     bool IsVisible() const { return visible_; }
+
+    /// Return whether element is effectively visible (parent element chain is visible.)
+    bool IsVisibleEffective() const;
+
     /// Return whether the cursor is hovering on this element.
     bool IsHovering() const { return hovering_; }
+
     /// Return whether is internally created.
     bool IsInternal() const { return internal_; }
+
     /// Return whether has different color in at least one corner.
     bool HasColorGradient() const { return colorGradient_; }
+
     /// Return focus mode.
     FocusMode GetFocusMode() const { return focusMode_; }
+
     /// Return drag and drop flags.
-    unsigned GetDragDropMode() const { return dragDropMode_; }
+    DragAndDropModeFlags GetDragDropMode() const { return dragDropMode_; }
+
     /// Return applied style name. Return an empty string when the applied style is an 'auto' style (i.e. style derived from instance's type).
     const String& GetAppliedStyle() const;
     /// Return default style.
     XMLFile* GetDefaultStyle(bool recursiveUp = true) const;
+
     /// Return layout mode.
     LayoutMode GetLayoutMode() const { return layoutMode_; }
+
     /// Return layout spacing.
     int GetLayoutSpacing() const { return layoutSpacing_; }
+
     /// Return layout border.
     const IntRect& GetLayoutBorder() const { return layoutBorder_; }
+
     /// Return layout flex scale.
     const Vector2& GetLayoutFlexScale() const { return layoutFlexScale_; }
+
     /// Return number of child elements.
     unsigned GetNumChildren(bool recursive = false) const;
     /// Return child element by index.
@@ -427,29 +563,44 @@ public:
     UIElement* GetChild(const String& name, bool recursive = false) const;
     /// Return child element by variable. If only key is provided, return the first child having the matching variable key. If value is also provided then the actual variable value would also be checked against.
     UIElement* GetChild(const StringHash& key, const Variant& value = Variant::EMPTY, bool recursive = false) const;
+
     /// Return immediate child elements.
     const Vector<SharedPtr<UIElement> >& GetChildren() const { return children_; }
+
     /// Return child elements either recursively or non-recursively.
     void GetChildren(PODVector<UIElement*>& dest, bool recursive = false) const;
+
     /// Return parent element.
     UIElement* GetParent() const { return parent_; }
+
     /// Return root element.
     UIElement* GetRoot() const;
     /// Return derived color. Only valid when no gradient.
     const Color& GetDerivedColor() const;
     /// Return a user variable.
     const Variant& GetVar(const StringHash& key) const;
+
     /// Return all user variables.
     const VariantMap& GetVars() const { return vars_; }
+
+    /// Return whether element is tagged by a specific tag.
+    bool HasTag(const String& tag) const;
+
+    /// Return all tags.
+    const StringVector& GetTags() const { return tags_; }
+
+    /// Return child elements with a specific tag either recursively or non-recursively.
+    void GetChildrenWithTag(PODVector<UIElement*>& dest, const String& tag, bool recursive = false) const;
+
+    /// Return child elements with a specific tag either recursively or non-recursively.
+    PODVector<UIElement*> GetChildrenWithTag(const String& tag, bool recursive = false) const;
+
     /// Return the drag button combo if this element is being dragged.
     int GetDragButtonCombo() const { return dragButtonCombo_; }
+
     /// Return the number of buttons dragging this element.
     unsigned GetDragButtonCount() const { return dragButtonCount_; }
 
-    /// Convert screen coordinates to element coordinates.
-    IntVector2 ScreenToElement(const IntVector2& screenPosition);
-    /// Convert element coordinates to screen coordinates.
-    IntVector2 ElementToScreen(const IntVector2& position);
     /// Return whether a point (either in element or screen coordinates) is inside the element.
     bool IsInside(IntVector2 position, bool isScreen);
     /// Return whether a point (either in element or screen coordinates) is inside the combined rect of the element and its children.
@@ -458,41 +609,53 @@ public:
     IntRect GetCombinedScreenRect();
     /// Sort child elements if sorting enabled and order dirty. Called by UI.
     void SortChildren();
-    /// Return minimum layout element size in the layout direction. Only valid after layout has been calculated. Used internally by UI for optimizations.
-    int GetLayoutMinSize() const { return layoutMinSize_; }
+
     /// Return maximum layout element size in the layout direction. Only valid after layout has been calculated. Used internally by UI for optimizations.
-    int GetLayoutMaxSize() const { return layoutMaxSize_; }
+    int GetLayoutElementMaxSize() const { return layoutElementMaxSize_; }
+
     /// Return horizontal indentation.
     int GetIndent() const { return indent_; }
+
     /// Return indent spacing (number of pixels per indentation level).
     int GetIndentSpacing() const { return indentSpacing_; }
+
     /// Return indent width in pixels.
     int GetIndentWidth() const { return indent_ * indentSpacing_; }
+
     /// Set child offset.
     void SetChildOffset(const IntVector2& offset);
     /// Set hovering state.
     void SetHovering(bool enable);
     /// Adjust scissor for rendering.
     void AdjustScissor(IntRect& currentScissor);
-    /// Get UI rendering batches with a specified offset. Also recurses to child elements.
-    void GetBatchesWithOffset(IntVector2& offset, PODVector<UIBatch>& batches, PODVector<float>& vertexData, IntRect
-        currentScissor);
+    /// Get UI rendering batches with a specified offset. Also recurse to child elements.
+    void GetBatchesWithOffset(IntVector2& offset, PODVector<UIBatch>& batches, PODVector<float>& vertexData, IntRect currentScissor);
+
     /// Return color attribute. Uses just the top-left color.
-    const Color& GetColorAttr() const { return color_[0]; }
+    const Color& GetColorAttr() const { return colors_[0]; }
+
     /// Return traversal mode for rendering.
     TraversalMode GetTraversalMode() const { return traversalMode_; }
+
     /// Return whether element should send child added / removed events by itself. If false, defers to parent element.
     bool IsElementEventSender() const { return elementEventSender_; }
+
     /// Get element which should send child added / removed events.
     UIElement* GetElementEventSender() const;
 
+    /// Return effective minimum size, also considering layout. Used internally.
+    IntVector2 GetEffectiveMinSize() const;
+
+    /// Set texture to which element will be rendered.
+    void SetRenderTexture(Texture2D* texture);
+
 protected:
     /// Handle attribute animation added.
-    virtual void OnAttributeAnimationAdded();
+    void OnAttributeAnimationAdded() override;
     /// Handle attribute animation removed.
-    virtual void OnAttributeAnimationRemoved();
-    /// Set object attribute animation internal.
-    virtual void SetObjectAttributeAnimation(const String& name, ValueAnimation* attributeAnimation, WrapMode wrapMode, float speed);
+    void OnAttributeAnimationRemoved() override;
+    /// Find target of an attribute animation from object hierarchy by name.
+    Animatable* FindAttributeAnimationTarget(const String& name, String& outName) override;
     /// Mark screen position as needing an update.
     void MarkDirty();
     /// Remove child XML element by matching attribute name.
@@ -503,89 +666,95 @@ protected:
     bool FilterUIStyleAttributes(XMLElement& dest, const XMLElement& styleElem) const;
     /// Filter implicit attributes in serialization process.
     virtual bool FilterImplicitAttributes(XMLElement& dest) const;
+    /// Update anchored size & position. Only called when anchoring is enabled.
+    void UpdateAnchoring();
 
     /// Name.
     String name_;
     /// Child elements.
     Vector<SharedPtr<UIElement> > children_;
     /// Parent element.
-    UIElement* parent_;
+    UIElement* parent_{};
     /// Child element clipping border.
     IntRect clipBorder_;
     /// Colors.
-    Color color_[MAX_UIELEMENT_CORNERS];
+    Color colors_[MAX_UIELEMENT_CORNERS];
     /// User variables.
     VariantMap vars_;
     /// Priority.
-    int priority_;
+    int priority_{};
     /// Bring to front when focused flag.
-    bool bringToFront_;
+    bool bringToFront_{};
     /// Bring to back when defocused flag.
-    bool bringToBack_;
+    bool bringToBack_{true};
     /// Clip children flag.
-    bool clipChildren_;
+    bool clipChildren_{};
     /// Sort children according to priority flag.
-    bool sortChildren_;
+    bool sortChildren_{true};
     /// Use derived opacity flag.
-    bool useDerivedOpacity_;
+    bool useDerivedOpacity_{true};
     /// Input enabled flag.
-    bool enabled_;
+    bool enabled_{};
     /// Last SetEnabled flag before any SetDeepEnabled.
-    bool enabledPrev_;
+    bool enabledPrev_{};
     /// Value editable flag.
-    bool editable_;
+    bool editable_{true};
     /// Selected flag.
-    bool selected_;
+    bool selected_{};
     /// Visible flag.
-    bool visible_;
+    bool visible_{true};
     /// Hovering flag.
-    bool hovering_;
+    bool hovering_{};
     /// Internally created flag.
-    bool internal_;
+    bool internal_{};
     /// Focus mode.
-    FocusMode focusMode_;
+    FocusMode focusMode_{FM_NOTFOCUSABLE};
     /// Drag and drop flags.
-    unsigned dragDropMode_;
+    DragAndDropModeFlags dragDropMode_{DD_DISABLED};
     /// Layout mode.
-    LayoutMode layoutMode_;
+    LayoutMode layoutMode_{LM_FREE};
     /// Layout spacing.
-    int layoutSpacing_;
+    int layoutSpacing_{};
     /// Layout borders.
-    IntRect layoutBorder_;
+    IntRect layoutBorder_{};
     /// Layout flex scale.
-    Vector2 layoutFlexScale_;
+    Vector2 layoutFlexScale_{Vector2::ONE};
     /// Resize nesting level to prevent multiple events and endless loop.
-    unsigned resizeNestingLevel_;
+    unsigned resizeNestingLevel_{};
     /// Layout update nesting level to prevent endless loop.
-    unsigned layoutNestingLevel_;
-    /// Layout element minimum size in layout direction.
-    int layoutMinSize_;
+    unsigned layoutNestingLevel_{};
     /// Layout element maximum size in layout direction.
-    int layoutMaxSize_;
+    int layoutElementMaxSize_{};
     /// Horizontal indentation.
-    int indent_;
+    int indent_{};
     /// Indent spacing (number of pixels per indentation level).
-    int indentSpacing_;
+    int indentSpacing_{16};
     /// Position.
-    IntVector2 position_;
+    IntVector2 position_{};
     /// Screen position.
     mutable IntVector2 screenPosition_;
     /// Screen position dirty flag.
-    mutable bool positionDirty_;
+    mutable bool positionDirty_{true};
     /// Applied style.
     String appliedStyle_;
     /// Drag button combo.
-    int dragButtonCombo_;
+    int dragButtonCombo_{};
     /// Drag button count.
-    unsigned dragButtonCount_;
+    unsigned dragButtonCount_{};
 
 private:
     /// Return child elements recursively.
     void GetChildrenRecursive(PODVector<UIElement*>& dest) const;
+    /// Return child elements with a specific tag recursively.
+    void GetChildrenWithTagRecursive(PODVector<UIElement*>& dest, const String& tag) const;
+    /// Recursively apply style to a child element hierarchy when adding to an element.
+    void ApplyStyleRecursive(UIElement* element);
     /// Calculate layout width for resizing the parent element.
     int CalculateLayoutParentSize(const PODVector<int>& sizes, int begin, int end, int spacing);
     /// Calculate child widths/positions in the layout.
-    void CalculateLayout(PODVector<int>& positions, PODVector<int>& sizes, const PODVector<int>& minSizes, const PODVector<int>& maxSizes, const PODVector<float>& flexScales, int targetWidth, int begin, int end, int spacing);
+    void CalculateLayout
+        (PODVector<int>& positions, PODVector<int>& sizes, const PODVector<int>& minSizes, const PODVector<int>& maxSizes,
+            const PODVector<float>& flexScales, int targetSize, int begin, int end, int spacing);
     /// Get child element constant position in a layout.
     IntVector2 GetLayoutChildPosition(UIElement* child);
     /// Detach from parent.
@@ -600,37 +769,86 @@ private:
     /// Minimum size.
     IntVector2 minSize_;
     /// Maximum size.
-    IntVector2 maxSize_;
+    IntVector2 maxSize_{M_MAX_INT, M_MAX_INT};
     /// Child elements' offset. Used internally.
     IntVector2 childOffset_;
-    /// Horizontal alignment.
-    HorizontalAlignment horizontalAlignment_;
-    /// Vertical alignment.
-    VerticalAlignment verticalAlignment_;
+    /// Parent's minimum size calculated by layout. Used internally.
+    IntVector2 layoutMinSize_;
+    /// Minimum offset.
+    IntVector2 minOffset_;
+    /// Maximum offset.
+    IntVector2 maxOffset_;
+    /// Use min/max anchor & min/max offset for position & size instead of setting explicitly.
+    bool enableAnchor_{};
+    /// Has pivot changed manually.
+    bool pivotSet_{};
+    /// Anchor minimum position.
+    Vector2 anchorMin_;
+    /// Anchor maximum position.
+    Vector2 anchorMax_;
+    /// Pivot Position
+    Vector2 pivot_;
     /// Opacity.
-    float opacity_;
+    float opacity_{1.0f};
     /// Derived opacity.
-    mutable float derivedOpacity_;
+    mutable float derivedOpacity_{};
     /// Derived color. Only valid when no gradient.
     mutable Color derivedColor_;
     /// Derived opacity dirty flag.
-    mutable bool opacityDirty_;
+    mutable bool opacityDirty_{true};
     /// Derived color dirty flag (only used when no gradient.)
-    mutable bool derivedColorDirty_;
+    mutable bool derivedColorDirty_{true};
     /// Child priority sorting dirty flag.
-    bool sortOrderDirty_;
+    bool sortOrderDirty_{};
     /// Has color gradient flag.
-    bool colorGradient_;
+    bool colorGradient_{};
     /// Default style file.
     SharedPtr<XMLFile> defaultStyle_;
+    /// Last applied style file.
+    WeakPtr<XMLFile> appliedStyleFile_;
     /// Traversal mode for rendering.
-    TraversalMode traversalMode_;
+    TraversalMode traversalMode_{TM_BREADTH_FIRST};
     /// Flag whether node should send child added / removed events by itself.
-    bool elementEventSender_;
+    bool elementEventSender_{};
     /// XPath query for selecting UI-style.
     static XPathQuery styleXPathQuery_;
+    /// Tag list.
+    StringVector tags_;
 };
 
-template <class T> T* UIElement::CreateChild(const String& name, unsigned index) { return static_cast<T*>(CreateChild(T::GetTypeStatic(), name, index)); }
+template <class T> T* UIElement::CreateChild(const String& name, unsigned index)
+{
+    return static_cast<T*>(CreateChild(T::GetTypeStatic(), name, index));
+}
+
+template <class T> T* UIElement::GetChildStaticCast(unsigned index) const
+{
+    return static_cast<T*>(GetChild(index));
+}
+
+template <class T> T* UIElement::GetChildStaticCast(const String& name, bool recursive) const
+{
+    return static_cast<T*>(GetChild(name, recursive));
+}
+
+template <class T> T* UIElement::GetChildStaticCast(const StringHash& key, const Variant& value, bool recursive) const
+{
+    return static_cast<T*>(GetChild(key, value, recursive));
+}
+
+template <class T> T* UIElement::GetChildDynamicCast(unsigned index) const
+{
+    return dynamic_cast<T*>(GetChild(index));
+}
+
+template <class T> T* UIElement::GetChildDynamicCast(const String& name, bool recursive) const
+{
+    return dynamic_cast<T*>(GetChild(name, recursive));
+}
+
+template <class T> T* UIElement::GetChildDynamicCast(const StringHash& key, const Variant& value, bool recursive) const
+{
+    return dynamic_cast<T*>(GetChild(key, value, recursive));
+}
 
 }

@@ -14,6 +14,96 @@ class EditActionGroup
     Array<EditAction@> actions;
 }
 
+class CreateDrawableMaskAction : EditAction
+{
+    uint nodeID;
+    uint drawableID;
+    int oldMask;
+    int redoMask;
+    int typeMask;
+
+    void Define(Drawable@ drawable, int editMaskType)
+    {
+        drawableID = drawable.id;
+        nodeID = drawable.node.id;
+
+        switch (editMaskType)
+        {
+            case EDIT_VIEW_MASK:
+                oldMask = drawable.viewMask;
+                break;
+            case EDIT_LIGHT_MASK:
+                oldMask = drawable.lightMask;
+                break;
+            case EDIT_SHADOW_MASK:
+                oldMask = drawable.shadowMask;
+                break;
+            case EDIT_ZONE_MASK:
+                oldMask = drawable.zoneMask;
+                break;
+        }
+
+        typeMask = editMaskType;
+        redoMask = oldMask;
+    }
+
+    void Undo()
+    {
+        Node@ node = editorScene.GetNode(nodeID);
+        Drawable@ drawable = editorScene.GetComponent(drawableID);
+        if (node !is null && drawable !is null)
+        {
+            switch (typeMask)
+            {
+            case EDIT_VIEW_MASK:
+                redoMask = drawable.viewMask;
+                drawable.viewMask = oldMask;
+                break;
+            case EDIT_LIGHT_MASK:
+                redoMask = drawable.lightMask;
+                drawable.lightMask = oldMask;
+                break;
+            case EDIT_SHADOW_MASK:
+                redoMask = drawable.shadowMask;
+                drawable.shadowMask = oldMask;
+                break;
+            case EDIT_ZONE_MASK:
+                redoMask = drawable.zoneMask;
+                drawable.zoneMask = oldMask;
+                break;
+            }
+        }
+    }
+
+    void Redo()
+    {
+        Node@ node = editorScene.GetNode(nodeID);
+        Drawable@ drawable = editorScene.GetComponent(drawableID);
+        if (node !is null && drawable !is null)
+        {
+            switch (typeMask)
+            {
+            case EDIT_VIEW_MASK:
+                oldMask = drawable.viewMask;
+                drawable.viewMask = redoMask;
+                break;
+            case EDIT_LIGHT_MASK:
+                oldMask = drawable.lightMask;
+                drawable.lightMask = redoMask;
+                break;
+            case EDIT_SHADOW_MASK:
+                oldMask = drawable.shadowMask;
+                drawable.shadowMask = redoMask;
+                break;
+            case EDIT_ZONE_MASK:
+                oldMask = drawable.zoneMask;
+                drawable.zoneMask = redoMask;
+                break;
+            }
+        }
+    }
+}
+
 class CreateNodeAction : EditAction
 {
     uint nodeID;
@@ -45,7 +135,7 @@ class CreateNodeAction : EditAction
         Node@ parent = editorScene.GetNode(parentID);
         if (parent !is null)
         {
-            Node@ node = parent.CreateChild("", nodeID < FIRST_LOCAL_ID ? REPLICATED : LOCAL, nodeID);
+            Node@ node = parent.CreateChild("", IsReplicatedID(nodeID) ? REPLICATED : LOCAL, nodeID);
             node.LoadXML(nodeData.root);
             FocusNode(node);
         }
@@ -76,7 +166,7 @@ class DeleteNodeAction : EditAction
             // Handle update manually so that the node can be reinserted back into its previous list index
             suppressSceneChanges = true;
 
-            Node@ node = parent.CreateChild("", nodeID < FIRST_LOCAL_ID ? REPLICATED : LOCAL, nodeID);
+            Node@ node = parent.CreateChild("", IsReplicatedID(nodeID) ? REPLICATED : LOCAL, nodeID);
             if (node.LoadXML(nodeData.root))
             {
                 uint listItemIndex = nodeData.root.GetUInt("listItemIndex");
@@ -178,6 +268,70 @@ class ReparentNodeAction : EditAction
     }
 }
 
+class ReorderNodeAction : EditAction
+{
+    uint nodeID;
+    uint parentID;
+    uint oldChildIndex;
+    uint newChildIndex;
+
+    void Define(Node@ node, uint newIndex)
+    {
+        nodeID = node.id;
+        parentID = node.parent.id;
+        oldChildIndex = SceneFindChildIndex(node.parent, node);
+        newChildIndex = newIndex;
+    }
+
+    void Undo()
+    {
+        Node@ parent = editorScene.GetNode(parentID);
+        Node@ node = editorScene.GetNode(nodeID);
+        if (parent !is null && node !is null)
+            PerformReorder(parent, node, oldChildIndex);
+    }
+
+    void Redo()
+    {
+        Node@ parent = editorScene.GetNode(parentID);
+        Node@ node = editorScene.GetNode(nodeID);
+        if (parent !is null && node !is null)
+            PerformReorder(parent, node, newChildIndex);
+    }
+}
+
+class ReorderComponentAction : EditAction
+{
+    uint componentID;
+    uint nodeID;
+    uint oldComponentIndex;
+    uint newComponentIndex;
+
+    void Define(Component@ component, uint newIndex)
+    {
+        componentID = component.id;
+        nodeID = component.node.id;
+        oldComponentIndex = SceneFindComponentIndex(component.node, component);
+        newComponentIndex = newIndex;
+    }
+
+    void Undo()
+    {
+        Node@ node = editorScene.GetNode(nodeID);
+        Component@ component = editorScene.GetComponent(componentID);
+        if (node !is null && component !is null)
+            PerformReorder(node, component, oldComponentIndex);
+    }
+
+    void Redo()
+    {
+        Node@ node = editorScene.GetNode(nodeID);
+        Component@ component = editorScene.GetComponent(componentID);
+        if (node !is null && component !is null)
+            PerformReorder(node, component, newComponentIndex);
+    }
+}
+
 class CreateComponentAction : EditAction
 {
     uint nodeID;
@@ -209,7 +363,7 @@ class CreateComponentAction : EditAction
         Node@ node = editorScene.GetNode(nodeID);
         if (node !is null)
         {
-            Component@ component = node.CreateComponent(componentData.root.GetAttribute("type"), componentID < FIRST_LOCAL_ID ?
+            Component@ component = node.CreateComponent(componentData.root.GetAttribute("type"), IsReplicatedID(componentID) ?
                 REPLICATED : LOCAL, componentID);
             component.LoadXML(componentData.root);
             component.ApplyAttributes();
@@ -243,7 +397,7 @@ class DeleteComponentAction : EditAction
             // Handle update manually so that the component can be reinserted back into its previous list index
             suppressSceneChanges = true;
 
-            Component@ component = node.CreateComponent(componentData.root.GetAttribute("type"), componentID < FIRST_LOCAL_ID ?
+            Component@ component = node.CreateComponent(componentData.root.GetAttribute("type"), IsReplicatedID(componentID) ?
                 REPLICATED : LOCAL, componentID);
             if (component.LoadXML(componentData.root))
             {
@@ -320,8 +474,6 @@ class EditAttributeAction : EditAction
                 SetUIElementModified(target);
             else
                 SetSceneModified();
-                
-            EditScriptAttributes(target, attrIndex);
         }
     }
 
@@ -341,8 +493,6 @@ class EditAttributeAction : EditAction
                 SetUIElementModified(target);
             else
                 SetSceneModified();
-                
-            EditScriptAttributes(target, attrIndex);
         }
     }
 }
@@ -582,7 +732,7 @@ class CreateUIElementAction : EditAction
             // Have to update manually because the element ID var is not set yet when the E_ELEMENTADDED event is sent
             suppressUIElementChanges = true;
 
-            if (parent.LoadChildXML(elementData.root, styleFile))
+            if (parent.LoadChildXML(elementData.root, styleFile) !is null)
             {
                 UIElement@ element = parent.children[parent.numChildren - 1];
                 UpdateHierarchyItem(element);
@@ -623,7 +773,7 @@ class DeleteUIElementAction : EditAction
             // Have to update manually because the element ID var is not set yet when the E_ELEMENTADDED event is sent
             suppressUIElementChanges = true;
 
-            if (parent.LoadChildXML(elementData.root, styleFile))
+            if (parent.LoadChildXML(elementData.root, styleFile) !is null)
             {
                 XMLElement rootElem = elementData.root;
                 uint index = rootElem.GetUInt("index");
@@ -690,6 +840,38 @@ class ReparentUIElementAction : EditAction
     }
 }
 
+class ReorderUIElementAction : EditAction
+{
+    Variant elementID;
+    Variant parentID;
+    uint oldChildIndex;
+    uint newChildIndex;
+
+    void Define(UIElement@ element, uint newIndex)
+    {
+        elementID = GetUIElementID(element);
+        parentID = GetUIElementID(element.parent);
+        oldChildIndex = element.parent.FindChild(element);
+        newChildIndex = newIndex;
+    }
+
+    void Undo()
+    {
+        UIElement@ parent = GetUIElementByID(parentID);
+        UIElement@ element = GetUIElementByID(elementID);
+        if (parent !is null && element !is null)
+            PerformReorder(parent, element, oldChildIndex);
+    }
+
+    void Redo()
+    {
+        UIElement@ parent = GetUIElementByID(parentID);
+        UIElement@ element = GetUIElementByID(elementID);
+        if (parent !is null && element !is null)
+            PerformReorder(parent, element, newChildIndex);
+    }
+}
+
 class ApplyUIElementStyleAction : EditAction
 {
     Variant elementID;
@@ -726,15 +908,15 @@ class ApplyUIElementStyleAction : EditAction
             suppressUIElementChanges = true;
 
             parent.RemoveChild(element);
-            if (parent.LoadChildXML(elementData.root, styleFile))
+            if (parent.LoadChildXML(elementData.root, styleFile) !is null)
             {
                 XMLElement rootElem = elementData.root;
                 uint index = rootElem.GetUInt("index");
                 uint listItemIndex = rootElem.GetUInt("listItemIndex");
-                UIElement@ element = parent.children[index];
+                UIElement@ elem = parent.children[index];
                 UIElement@ parentItem = hierarchyList.items[GetListIndex(parent)];
-                UpdateHierarchyItem(listItemIndex, element, parentItem);
-                SetUIElementModified(element);
+                UpdateHierarchyItem(listItemIndex, elem, parentItem);
+                SetUIElementModified(elem);
                 hierarchyUpdateSelections.Push(listItemIndex);
             }
 
@@ -877,8 +1059,8 @@ class AssignModelAction : EditAction
     void Define(StaticModel@ staticModel_, Model@ oldModel_, Model@ newModel_)
     {
         staticModel = staticModel_;
-        oldModel = oldModel_.name;
-        newModel = newModel_.name;
+        oldModel = (oldModel_ !is null) ? oldModel_.name : "";
+        newModel = (newModel_ !is null) ? newModel_.name : "";
     }
 
     void Undo()
@@ -905,4 +1087,66 @@ class AssignModelAction : EditAction
         staticModel_.model = model;
     }
 
+}
+
+class ModifyTerrainAction : EditAction
+{
+    WeakHandle terrain;
+    IntVector2 offset;
+    VectorBuffer compressedOldBuffer;
+    VectorBuffer compressedNewBuffer;
+
+    void Define(Terrain@ terrain_, IntVector2 offset_, Image@ oldImage_, Image@ newImage_)
+    {
+        terrain = terrain_;
+        offset = offset_;
+        VectorBuffer uncompressedOldBuffer;
+        VectorBuffer uncompressedNewBuffer;
+        oldImage_.Save(uncompressedOldBuffer);
+        newImage_.Save(uncompressedNewBuffer);
+        compressedOldBuffer = CompressVectorBuffer(uncompressedOldBuffer);
+        compressedNewBuffer = CompressVectorBuffer(uncompressedNewBuffer);
+    }
+
+    void Undo()
+    {
+        Terrain@ terrain_ = terrain.Get();
+        if (terrain_ is null)
+            return;
+
+        VectorBuffer uncompressedOldBuffer = DecompressVectorBuffer(compressedOldBuffer);
+        Image oldImage;
+        oldImage.Load(uncompressedOldBuffer);
+
+        for (int y = 0; y < oldImage.height; ++y)
+        {
+            for (int x = 0; x < oldImage.width; ++x)
+            {
+                terrain_.heightMap.SetPixel(offset.x + x, offset.y + y, oldImage.GetPixel(x, y));
+            }
+        }
+
+        terrain_.ApplyHeightMap();
+    }
+
+    void Redo()
+    {
+        Terrain@ terrain_ = terrain.Get();
+        if (terrain_ is null)
+            return;
+
+        VectorBuffer uncompressedNewBuffer = DecompressVectorBuffer(compressedNewBuffer);
+        Image newImage;
+        newImage.Load(uncompressedNewBuffer);
+
+        for (int y = 0; y < newImage.height; ++y)
+        {
+            for (int x = 0; x < newImage.width; ++x)
+            {
+                terrain_.heightMap.SetPixel(offset.x + x, offset.y + y, newImage.GetPixel(x, y));
+            }
+        }
+
+        terrain_.ApplyHeightMap();
+    }
 }

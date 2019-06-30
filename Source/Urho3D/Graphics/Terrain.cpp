@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,22 +20,24 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
+#include "../Core/Profiler.h"
 #include "../Graphics/DrawableEvents.h"
 #include "../Graphics/Geometry.h"
-#include "../Resource/Image.h"
 #include "../Graphics/IndexBuffer.h"
-#include "../IO/Log.h"
 #include "../Graphics/Material.h"
-#include "../Scene/Node.h"
 #include "../Graphics/Octree.h"
-#include "../Core/Profiler.h"
-#include "../Resource/ResourceCache.h"
-#include "../Resource/ResourceEvents.h"
-#include "../Scene/Scene.h"
 #include "../Graphics/Terrain.h"
 #include "../Graphics/TerrainPatch.h"
 #include "../Graphics/VertexBuffer.h"
+#include "../IO/Log.h"
+#include "../Resource/Image.h"
+#include "../Resource/ResourceCache.h"
+#include "../Resource/ResourceEvents.h"
+#include "../Scene/Node.h"
+#include "../Scene/Scene.h"
 
 #include "../DebugNew.h"
 
@@ -45,6 +47,7 @@ namespace Urho3D
 extern const char* GEOMETRY_CATEGORY;
 
 static const Vector3 DEFAULT_SPACING(1.0f, 0.25f, 1.0f);
+static const unsigned MIN_LOD_LEVELS = 1;
 static const unsigned MAX_LOD_LEVELS = 4;
 static const int DEFAULT_PATCH_SIZE = 32;
 static const int MIN_PATCH_SIZE = 4;
@@ -53,6 +56,26 @@ static const unsigned STITCH_NORTH = 1;
 static const unsigned STITCH_SOUTH = 2;
 static const unsigned STITCH_WEST = 4;
 static const unsigned STITCH_EAST = 8;
+
+inline void GrowUpdateRegion(IntRect& updateRegion, int x, int y)
+{
+    if (updateRegion.left_ < 0)
+    {
+        updateRegion.left_ = updateRegion.right_ = x;
+        updateRegion.top_ = updateRegion.bottom_ = y;
+    }
+    else
+    {
+        if (x < updateRegion.left_)
+            updateRegion.left_ = x;
+        if (x > updateRegion.right_)
+            updateRegion.right_ = x;
+        if (y < updateRegion.top_)
+            updateRegion.top_ = y;
+        if (y > updateRegion.bottom_)
+            updateRegion.bottom_ = y;
+    }
+}
 
 Terrain::Terrain(Context* context) :
     Component(context),
@@ -67,6 +90,8 @@ Terrain::Terrain(Context* context) :
     patchSize_(DEFAULT_PATCH_SIZE),
     lastPatchSize_(0),
     numLodLevels_(1),
+    maxLodLevels_(MAX_LOD_LEVELS),
+    occlusionLodLevel_(M_MAX_UNSIGNED),
     smoothing_(false),
     visible_(true),
     castShadows_(false),
@@ -80,51 +105,68 @@ Terrain::Terrain(Context* context) :
     shadowDistance_(0.0f),
     lodBias_(1.0f),
     maxLights_(0),
-    recreateTerrain_(false)
+    northID_(0),
+    southID_(0),
+    westID_(0),
+    eastID_(0),
+    recreateTerrain_(false),
+    neighborsDirty_(false)
 {
     indexBuffer_->SetShadowed(true);
 }
 
-Terrain::~Terrain()
-{
-}
+Terrain::~Terrain() = default;
 
 void Terrain::RegisterObject(Context* context)
 {
     context->RegisterFactory<Terrain>(GEOMETRY_CATEGORY);
 
-    ACCESSOR_ATTRIBUTE("Is Enabled", IsEnabled, SetEnabled, bool, true, AM_DEFAULT);
-    MIXED_ACCESSOR_ATTRIBUTE("Height Map", GetHeightMapAttr, SetHeightMapAttr, ResourceRef, ResourceRef(Image::GetTypeStatic()), AM_DEFAULT);
-    MIXED_ACCESSOR_ATTRIBUTE("Material", GetMaterialAttr, SetMaterialAttr, ResourceRef, ResourceRef(Material::GetTypeStatic()), AM_DEFAULT);
-    ATTRIBUTE("Vertex Spacing", Vector3, spacing_, DEFAULT_SPACING, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Patch Size", GetPatchSize, SetPatchSizeAttr, int, DEFAULT_PATCH_SIZE, AM_DEFAULT);
-    ATTRIBUTE("Smooth Height Map", bool, smoothing_, false, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Is Occluder", IsOccluder, SetOccluder, bool,  false, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Can Be Occluded", IsOccludee, SetOccludee, bool, true, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Cast Shadows", GetCastShadows, SetCastShadows, bool, false, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Draw Distance", GetDrawDistance, SetDrawDistance, float, 0.0f, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Shadow Distance", GetShadowDistance, SetShadowDistance, float, 0.0f, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("LOD Bias", GetLodBias, SetLodBias, float, 1.0f, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Max Lights", GetMaxLights, SetMaxLights, unsigned, 0, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("View Mask", GetViewMask, SetViewMask, unsigned, DEFAULT_VIEWMASK, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Light Mask", GetLightMask, SetLightMask, unsigned, DEFAULT_LIGHTMASK, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Shadow Mask", GetShadowMask, SetShadowMask, unsigned, DEFAULT_SHADOWMASK, AM_DEFAULT);
-    ACCESSOR_ATTRIBUTE("Zone Mask", GetZoneMask, SetZoneMask, unsigned, DEFAULT_ZONEMASK, AM_DEFAULT);
-}
-
-void Terrain::OnSetAttribute(const AttributeInfo& attr, const Variant& src)
-{
-    Serializable::OnSetAttribute(attr, src);
-
-    // Change of any non-accessor attribute requires recreation of the terrain
-    if (!attr.accessor_)
-        recreateTerrain_ = true;
+    URHO3D_ACCESSOR_ATTRIBUTE("Is Enabled", IsEnabled, SetEnabled, bool, true, AM_DEFAULT);
+    URHO3D_MIXED_ACCESSOR_ATTRIBUTE("Height Map", GetHeightMapAttr, SetHeightMapAttr, ResourceRef, ResourceRef(Image::GetTypeStatic()),
+        AM_DEFAULT);
+    URHO3D_MIXED_ACCESSOR_ATTRIBUTE("Material", GetMaterialAttr, SetMaterialAttr, ResourceRef, ResourceRef(Material::GetTypeStatic()),
+        AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("North Neighbor NodeID", unsigned, northID_, MarkNeighborsDirty, 0, AM_DEFAULT | AM_NODEID);
+    URHO3D_ATTRIBUTE_EX("South Neighbor NodeID", unsigned, southID_, MarkNeighborsDirty, 0, AM_DEFAULT | AM_NODEID);
+    URHO3D_ATTRIBUTE_EX("West Neighbor NodeID", unsigned, westID_, MarkNeighborsDirty, 0, AM_DEFAULT | AM_NODEID);
+    URHO3D_ATTRIBUTE_EX("East Neighbor NodeID", unsigned, eastID_, MarkNeighborsDirty, 0, AM_DEFAULT | AM_NODEID);
+    URHO3D_ATTRIBUTE_EX("Vertex Spacing", Vector3, spacing_, MarkTerrainDirty, DEFAULT_SPACING, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Patch Size", GetPatchSize, SetPatchSizeAttr, int, DEFAULT_PATCH_SIZE, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Max LOD Levels", GetMaxLodLevels, SetMaxLodLevelsAttr, unsigned, MAX_LOD_LEVELS, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("Smooth Height Map", bool, smoothing_, MarkTerrainDirty, false, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Is Occluder", IsOccluder, SetOccluder, bool, false, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Can Be Occluded", IsOccludee, SetOccludee, bool, true, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Cast Shadows", GetCastShadows, SetCastShadows, bool, false, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Draw Distance", GetDrawDistance, SetDrawDistance, float, 0.0f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Shadow Distance", GetShadowDistance, SetShadowDistance, float, 0.0f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("LOD Bias", GetLodBias, SetLodBias, float, 1.0f, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Max Lights", GetMaxLights, SetMaxLights, unsigned, 0, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("View Mask", GetViewMask, SetViewMask, unsigned, DEFAULT_VIEWMASK, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Light Mask", GetLightMask, SetLightMask, unsigned, DEFAULT_LIGHTMASK, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Shadow Mask", GetShadowMask, SetShadowMask, unsigned, DEFAULT_SHADOWMASK, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Zone Mask", GetZoneMask, SetZoneMask, unsigned, DEFAULT_ZONEMASK, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Occlusion LOD level", GetOcclusionLodLevel, SetOcclusionLodLevelAttr, unsigned, M_MAX_UNSIGNED, AM_DEFAULT);
 }
 
 void Terrain::ApplyAttributes()
 {
     if (recreateTerrain_)
         CreateGeometry();
+
+    if (neighborsDirty_)
+    {
+        Scene* scene = GetScene();
+        Node* north = scene ? scene->GetNode(northID_) : nullptr;
+        Node* south = scene ? scene->GetNode(southID_) : nullptr;
+        Node* west = scene ? scene->GetNode(westID_) : nullptr;
+        Node* east = scene ? scene->GetNode(eastID_) : nullptr;
+        Terrain* northTerrain = north ? north->GetComponent<Terrain>() : nullptr;
+        Terrain* southTerrain = south ? south->GetComponent<Terrain>() : nullptr;
+        Terrain* westTerrain = west ? west->GetComponent<Terrain>() : nullptr;
+        Terrain* eastTerrain = east ? east->GetComponent<Terrain>() : nullptr;
+        SetNeighbors(northTerrain, southTerrain, westTerrain, eastTerrain);
+        neighborsDirty_ = false;
+    }
 }
 
 void Terrain::OnSetEnabled()
@@ -140,7 +182,7 @@ void Terrain::OnSetEnabled()
 
 void Terrain::SetPatchSize(int size)
 {
-    if (size < MIN_PATCH_SIZE || size > MAX_PATCH_SIZE || !IsPowerOfTwo(size))
+    if (size < MIN_PATCH_SIZE || size > MAX_PATCH_SIZE || !IsPowerOfTwo((unsigned)size))
         return;
 
     if (size != patchSize_)
@@ -157,6 +199,31 @@ void Terrain::SetSpacing(const Vector3& spacing)
     if (spacing != spacing_)
     {
         spacing_ = spacing;
+
+        CreateGeometry();
+        MarkNetworkUpdate();
+    }
+}
+
+void Terrain::SetMaxLodLevels(unsigned levels)
+{
+    levels = Clamp(levels, MIN_LOD_LEVELS, MAX_LOD_LEVELS);
+    if (levels != maxLodLevels_)
+    {
+        maxLodLevels_ = levels;
+        lastPatchSize_ = 0; // Force full recreate
+
+        CreateGeometry();
+        MarkNetworkUpdate();
+    }
+}
+
+void Terrain::SetOcclusionLodLevel(unsigned level)
+{
+    if (level != occlusionLodLevel_)
+    {
+        occlusionLodLevel_ = level;
+        lastPatchSize_ = 0; // Force full recreate
 
         CreateGeometry();
         MarkNetworkUpdate();
@@ -191,6 +258,122 @@ void Terrain::SetMaterial(Material* material)
             patches_[i]->SetMaterial(material);
     }
 
+    MarkNetworkUpdate();
+}
+
+void Terrain::SetNorthNeighbor(Terrain* north)
+{
+    if (north == north_)
+        return;
+
+    if (north_ && north_->GetNode())
+        UnsubscribeFromEvent(north_->GetNode(), E_TERRAINCREATED);
+
+    north_ = north;
+    if (north_ && north_->GetNode())
+    {
+        northID_ = north_->GetNode()->GetID();
+        SubscribeToEvent(north_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+
+    UpdateEdgePatchNeighbors();
+    MarkNetworkUpdate();
+}
+
+void Terrain::SetSouthNeighbor(Terrain* south)
+{
+    if (south == south_)
+        return;
+
+    if (south_ && south_->GetNode())
+        UnsubscribeFromEvent(south_->GetNode(), E_TERRAINCREATED);
+
+    south_ = south;
+    if (south_ && south_->GetNode())
+    {
+        southID_ = south_->GetNode()->GetID();
+        SubscribeToEvent(south_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+
+    UpdateEdgePatchNeighbors();
+    MarkNetworkUpdate();
+}
+
+void Terrain::SetWestNeighbor(Terrain* west)
+{
+    if (west == west_)
+        return;
+
+    if (west_ && west_->GetNode())
+        UnsubscribeFromEvent(west_->GetNode(), E_TERRAINCREATED);
+
+    west_ = west;
+    if (west_ && west_->GetNode())
+    {
+        westID_ = west_->GetNode()->GetID();
+        SubscribeToEvent(west_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+
+    UpdateEdgePatchNeighbors();
+    MarkNetworkUpdate();
+}
+
+void Terrain::SetEastNeighbor(Terrain* east)
+{
+    if (east == east_)
+        return;
+
+    if (east_ && east_->GetNode())
+        UnsubscribeFromEvent(east_->GetNode(), E_TERRAINCREATED);
+
+    east_ = east;
+    if (east_ && east_->GetNode())
+    {
+        eastID_ = east_->GetNode()->GetID();
+        SubscribeToEvent(east_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+
+    UpdateEdgePatchNeighbors();
+    MarkNetworkUpdate();
+}
+
+void Terrain::SetNeighbors(Terrain* north, Terrain* south, Terrain* west, Terrain* east)
+{
+    if (north_ && north_->GetNode())
+        UnsubscribeFromEvent(north_->GetNode(), E_TERRAINCREATED);
+    if (south_ && south_->GetNode())
+        UnsubscribeFromEvent(south_->GetNode(), E_TERRAINCREATED);
+    if (west_ && west_->GetNode())
+        UnsubscribeFromEvent(west_->GetNode(), E_TERRAINCREATED);
+    if (east_ && east_->GetNode())
+        UnsubscribeFromEvent(east_->GetNode(), E_TERRAINCREATED);
+
+    north_ = north;
+    if (north_ && north_->GetNode())
+    {
+        northID_ = north_->GetNode()->GetID();
+        SubscribeToEvent(north_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+    south_ = south;
+    if (south_ && south_->GetNode())
+    {
+        southID_ = south_->GetNode()->GetID();
+        SubscribeToEvent(south_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+    west_ = west;
+    if (west_ && west_->GetNode())
+    {
+        westID_ = west_->GetNode()->GetID();
+        SubscribeToEvent(west_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+    east_ = east;
+    if (east_ && east_->GetNode())
+    {
+        eastID_ = east_->GetNode()->GetID();
+        SubscribeToEvent(east_->GetNode(), E_TERRAINCREATED, URHO3D_HANDLER(Terrain, HandleNeighborTerrainCreated));
+    }
+
+    UpdateEdgePatchNeighbors();
     MarkNetworkUpdate();
 }
 
@@ -344,15 +527,29 @@ Material* Terrain::GetMaterial() const
 
 TerrainPatch* Terrain::GetPatch(unsigned index) const
 {
-    return index < patches_.Size() ? patches_[index] : (TerrainPatch*)0;
+    return index < patches_.Size() ? patches_[index] : nullptr;
 }
 
 TerrainPatch* Terrain::GetPatch(int x, int z) const
 {
     if (x < 0 || x >= numPatches_.x_ || z < 0 || z >= numPatches_.y_)
-        return 0;
+        return nullptr;
     else
-        return GetPatch(z * numPatches_.x_ + x);
+        return GetPatch((unsigned)(z * numPatches_.x_ + x));
+}
+
+TerrainPatch* Terrain::GetNeighborPatch(int x, int z) const
+{
+    if (z >= numPatches_.y_ && north_)
+        return north_->GetPatch(x, z - numPatches_.y_);
+    else if (z < 0 && south_)
+        return south_->GetPatch(x, z + south_->GetNumPatches().y_);
+    else if (x < 0 && west_)
+        return west_->GetPatch(x + west_->GetNumPatches().x_, z);
+    else if (x >= numPatches_.x_ && east_)
+        return east_->GetPatch(x - numPatches_.x_, z);
+    else
+        return GetPatch(x, z);
 }
 
 float Terrain::GetHeight(const Vector3& worldPosition) const
@@ -362,8 +559,8 @@ float Terrain::GetHeight(const Vector3& worldPosition) const
         Vector3 position = node_->GetWorldTransform().Inverse() * worldPosition;
         float xPos = (position.x_ - patchWorldOrigin_.x_) / spacing_.x_;
         float zPos = (position.z_ - patchWorldOrigin_.y_) / spacing_.z_;
-        float xFrac = xPos - floorf(xPos);
-        float zFrac = zPos - floorf(zPos);
+        float xFrac = Fract(xPos);
+        float zFrac = Fract(zPos);
         float h1, h2, h3;
 
         if (xFrac + zFrac >= 1.0f)
@@ -396,8 +593,8 @@ Vector3 Terrain::GetNormal(const Vector3& worldPosition) const
         Vector3 position = node_->GetWorldTransform().Inverse() * worldPosition;
         float xPos = (position.x_ - patchWorldOrigin_.x_) / spacing_.x_;
         float zPos = (position.z_ - patchWorldOrigin_.y_) / spacing_.z_;
-        float xFrac = xPos - floorf(xPos);
-        float zFrac = zPos - floorf(zPos);
+        float xFrac = Fract(xPos);
+        float zFrac = Fract(zPos);
         Vector3 n1, n2, n3;
 
         if (xFrac + zFrac >= 1.0f)
@@ -428,40 +625,63 @@ IntVector2 Terrain::WorldToHeightMap(const Vector3& worldPosition) const
         return IntVector2::ZERO;
 
     Vector3 position = node_->GetWorldTransform().Inverse() * worldPosition;
-    int xPos = (int)((position.x_ - patchWorldOrigin_.x_) / spacing_.x_);
-    int zPos = (int)((position.z_ - patchWorldOrigin_.y_) / spacing_.z_);
-    Clamp(xPos, 0, numVertices_.x_);
-    Clamp(zPos, 0, numVertices_.y_);
+    auto xPos = RoundToInt((position.x_ - patchWorldOrigin_.x_) / spacing_.x_);
+    auto zPos = RoundToInt((position.z_ - patchWorldOrigin_.y_) / spacing_.z_);
+    xPos = Clamp(xPos, 0, numVertices_.x_ - 1);
+    zPos = Clamp(zPos, 0, numVertices_.y_ - 1);
 
-    return IntVector2(xPos, numVertices_.y_ - zPos);
+    return IntVector2(xPos, numVertices_.y_ - 1 - zPos);
+}
+
+Vector3 Terrain::HeightMapToWorld(const IntVector2& pixelPosition) const
+{
+    if (!node_)
+        return Vector3::ZERO;
+
+    IntVector2 pos(pixelPosition.x_, numVertices_.y_ - 1 - pixelPosition.y_);
+    auto xPos = pos.x_ * spacing_.x_ + patchWorldOrigin_.x_;
+    auto zPos = pos.y_ * spacing_.z_ + patchWorldOrigin_.y_;
+    Vector3 lPos(xPos, 0.0f, zPos);
+    Vector3 wPos = node_->GetWorldTransform() * lPos;
+    wPos.y_ = GetHeight(wPos);
+
+    return wPos;
 }
 
 void Terrain::CreatePatchGeometry(TerrainPatch* patch)
 {
-    PROFILE(CreatePatchGeometry);
+    URHO3D_PROFILE(CreatePatchGeometry);
 
-    unsigned row = patchSize_ + 1;
+    auto row = (unsigned)(patchSize_ + 1);
     VertexBuffer* vertexBuffer = patch->GetVertexBuffer();
     Geometry* geometry = patch->GetGeometry();
     Geometry* maxLodGeometry = patch->GetMaxLodGeometry();
-    Geometry* minLodGeometry = patch->GetMinLodGeometry();
+    Geometry* occlusionGeometry = patch->GetOcclusionGeometry();
 
     if (vertexBuffer->GetVertexCount() != row * row)
         vertexBuffer->SetSize(row * row, MASK_POSITION | MASK_NORMAL | MASK_TEXCOORD1 | MASK_TANGENT);
 
     SharedArrayPtr<unsigned char> cpuVertexData(new unsigned char[row * row * sizeof(Vector3)]);
+    SharedArrayPtr<unsigned char> occlusionCpuVertexData(new unsigned char[row * row * sizeof(Vector3)]);
 
-    float* vertexData = (float*)vertexBuffer->Lock(0, vertexBuffer->GetVertexCount());
-    float* positionData = (float*)cpuVertexData.Get();
+    auto* vertexData = (float*)vertexBuffer->Lock(0, vertexBuffer->GetVertexCount());
+    auto* positionData = (float*)cpuVertexData.Get();
+    auto* occlusionData = (float*)occlusionCpuVertexData.Get();
     BoundingBox box;
+
+    unsigned occlusionLevel = occlusionLodLevel_;
+    if (occlusionLevel > numLodLevels_ - 1)
+        occlusionLevel = numLodLevels_ - 1;
 
     if (vertexData)
     {
         const IntVector2& coords = patch->GetCoordinates();
+        unsigned lodExpand = (1u << (occlusionLevel)) - 1;
+        unsigned halfLodExpand = (1u << (occlusionLevel)) / 2;
 
-        for (int z = 0; z <= patchSize_; ++z)
+        for (unsigned z = 0; z <= patchSize_; ++z)
         {
-            for (int x = 0; x <= patchSize_; ++x)
+            for (unsigned x = 0; x <= patchSize_; ++x)
             {
                 int xPos = coords.x_ * patchSize_ + x;
                 int zPos = coords.y_ * patchSize_ + z;
@@ -477,6 +697,25 @@ void Terrain::CreatePatchGeometry(TerrainPatch* patch)
 
                 box.Merge(position);
 
+                // For vertices that are part of the occlusion LOD, calculate the minimum height in the neighborhood
+                // to prevent false positive occlusion due to inaccuracy between occlusion LOD & visible LOD
+                float minHeight = position.y_;
+                if (halfLodExpand > 0 && (x & lodExpand) == 0 && (z & lodExpand) == 0)
+                {
+                    int minX = Max(xPos - halfLodExpand, 0);
+                    int maxX = Min(xPos + halfLodExpand, numVertices_.x_ - 1);
+                    int minZ = Max(zPos - halfLodExpand, 0);
+                    int maxZ = Min(zPos + halfLodExpand, numVertices_.y_ - 1);
+                    for (int nZ = minZ; nZ <= maxZ; ++nZ)
+                    {
+                        for (int nX = minX; nX <= maxX; ++nX)
+                            minHeight = Min(minHeight, GetRawHeight(nX, nZ));
+                    }
+                }
+                *occlusionData++ = position.x_;
+                *occlusionData++ = minHeight;
+                *occlusionData++ = position.z_;
+
                 // Normal
                 Vector3 normal = GetRawNormal(xPos, zPos);
                 *vertexData++ = normal.x_;
@@ -484,7 +723,7 @@ void Terrain::CreatePatchGeometry(TerrainPatch* patch)
                 *vertexData++ = normal.z_;
 
                 // Texture coordinate
-                Vector2 texCoord((float)xPos / (float)numVertices_.x_, 1.0f - (float)zPos / (float)numVertices_.y_);
+                Vector2 texCoord((float)xPos / (float)(numVertices_.x_ - 1), 1.0f - (float)zPos / (float)(numVertices_.y_ - 1));
                 *vertexData++ = texCoord.x_;
                 *vertexData++ = texCoord.y_;
 
@@ -505,21 +744,19 @@ void Terrain::CreatePatchGeometry(TerrainPatch* patch)
 
     if (drawRanges_.Size())
     {
-        unsigned lastDrawRange = drawRanges_.Size() - 1;
+        unsigned occlusionDrawRange = occlusionLevel << 4u;
 
         geometry->SetIndexBuffer(indexBuffer_);
         geometry->SetDrawRange(TRIANGLE_LIST, drawRanges_[0].first_, drawRanges_[0].second_, false);
-        geometry->SetRawVertexData(cpuVertexData, sizeof(Vector3), MASK_POSITION);
+        geometry->SetRawVertexData(cpuVertexData, MASK_POSITION);
         maxLodGeometry->SetIndexBuffer(indexBuffer_);
         maxLodGeometry->SetDrawRange(TRIANGLE_LIST, drawRanges_[0].first_, drawRanges_[0].second_, false);
-        maxLodGeometry->SetRawVertexData(cpuVertexData, sizeof(Vector3), MASK_POSITION);
-        minLodGeometry->SetIndexBuffer(indexBuffer_);
-        minLodGeometry->SetDrawRange(TRIANGLE_LIST, drawRanges_[lastDrawRange].first_, drawRanges_[lastDrawRange].second_, false);
-        minLodGeometry->SetRawVertexData(cpuVertexData, sizeof(Vector3), MASK_POSITION);
+        maxLodGeometry->SetRawVertexData(cpuVertexData, MASK_POSITION);
+        occlusionGeometry->SetIndexBuffer(indexBuffer_);
+        occlusionGeometry->SetDrawRange(TRIANGLE_LIST, drawRanges_[occlusionDrawRange].first_, drawRanges_[occlusionDrawRange].second_, false);
+        occlusionGeometry->SetRawVertexData(occlusionCpuVertexData, MASK_POSITION);
     }
 
-    // Offset the occlusion geometry by vertex spacing to reduce possibility of over-aggressive occlusion
-    patch->SetOcclusionOffset(-0.5f * (spacing_.x_ + spacing_.z_));
     patch->ResetLod();
 }
 
@@ -529,7 +766,7 @@ void Terrain::UpdatePatchLod(TerrainPatch* patch)
 
     // All LOD levels except the coarsest have 16 versions for stitching
     unsigned lodLevel = patch->GetLodLevel();
-    unsigned drawRangeIndex = lodLevel << 4;
+    unsigned drawRangeIndex = lodLevel << 4u;
     if (lodLevel < numLodLevels_ - 1)
     {
         TerrainPatch* north = patch->GetNorthPatch();
@@ -553,25 +790,47 @@ void Terrain::UpdatePatchLod(TerrainPatch* patch)
 
 void Terrain::SetMaterialAttr(const ResourceRef& value)
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
     SetMaterial(cache->GetResource<Material>(value.name_));
 }
 
 void Terrain::SetHeightMapAttr(const ResourceRef& value)
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
-    Image* image = cache->GetResource<Image>(value.name_);
+    auto* cache = GetSubsystem<ResourceCache>();
+    auto* image = cache->GetResource<Image>(value.name_);
     SetHeightMapInternal(image, false);
 }
 
 void Terrain::SetPatchSizeAttr(int value)
 {
-    if (value < MIN_PATCH_SIZE || value > MAX_PATCH_SIZE || !IsPowerOfTwo(value))
+    if (value < MIN_PATCH_SIZE || value > MAX_PATCH_SIZE || !IsPowerOfTwo((unsigned)value))
         return;
 
     if (value != patchSize_)
     {
         patchSize_ = value;
+        recreateTerrain_ = true;
+    }
+}
+
+void Terrain::SetMaxLodLevelsAttr(unsigned value)
+{
+    value = Clamp(value, MIN_LOD_LEVELS, MAX_LOD_LEVELS);
+
+    if (value != maxLodLevels_)
+    {
+        maxLodLevels_ = value;
+        lastPatchSize_ = 0; // Force full recreate
+        recreateTerrain_ = true;
+    }
+}
+
+void Terrain::SetOcclusionLodLevelAttr(unsigned value)
+{
+    if (value != occlusionLodLevel_)
+    {
+        occlusionLodLevel_ = value;
+        lastPatchSize_ = 0; // Force full recreate
         recreateTerrain_ = true;
     }
 }
@@ -593,14 +852,14 @@ void Terrain::CreateGeometry()
     if (!node_)
         return;
 
-    PROFILE(CreateTerrainGeometry);
+    URHO3D_PROFILE(CreateTerrainGeometry);
 
     unsigned prevNumPatches = patches_.Size();
 
     // Determine number of LOD levels
-    unsigned lodSize = patchSize_;
+    auto lodSize = (unsigned)patchSize_;
     numLodLevels_ = 1;
-    while (lodSize > MIN_PATCH_SIZE && numLodLevels_ < MAX_LOD_LEVELS)
+    while (lodSize > MIN_PATCH_SIZE && numLodLevels_ < maxLodLevels_)
     {
         lodSize >>= 1;
         ++numLodLevels_;
@@ -614,11 +873,11 @@ void Terrain::CreateGeometry()
     {
         numPatches_ = IntVector2((heightMap_->GetWidth() - 1) / patchSize_, (heightMap_->GetHeight() - 1) / patchSize_);
         numVertices_ = IntVector2(numPatches_.x_ * patchSize_ + 1, numPatches_.y_ * patchSize_ + 1);
-        patchWorldOrigin_ = Vector2(-0.5f * (float)numPatches_.x_ * patchWorldSize_.x_, -0.5f * (float)numPatches_.y_ *
-            patchWorldSize_.y_);
-        if (numVertices_ != lastNumVertices_ || lastSpacing_ != spacing_ || patchSize_ != lastPatchSize_ )
+        patchWorldOrigin_ =
+            Vector2(-0.5f * (float)numPatches_.x_ * patchWorldSize_.x_, -0.5f * (float)numPatches_.y_ * patchWorldSize_.y_);
+        if (numVertices_ != lastNumVertices_ || lastSpacing_ != spacing_ || patchSize_ != lastPatchSize_)
             updateAll = true;
-        unsigned newDataSize = numVertices_.x_ * numVertices_.y_;
+        auto newDataSize = (unsigned)(numVertices_.x_ * numVertices_.y_);
 
         // Create new height data if terrain size changed
         if (!heightData_ || updateAll)
@@ -649,7 +908,7 @@ void Terrain::CreateGeometry()
     // Remove old patch nodes which are not needed
     if (updateAll)
     {
-        PROFILE(RemoveOldPatches);
+        URHO3D_PROFILE(RemoveOldPatches);
 
         PODVector<Node*> oldPatchNodes;
         node_->GetChildrenWithComponent<TerrainPatch>(oldPatchNodes);
@@ -671,7 +930,7 @@ void Terrain::CreateGeometry()
     }
 
     // Keep track of which patches actually need an update
-    PODVector<bool> dirtyPatches(numPatches_.x_ * numPatches_.y_);
+    PODVector<bool> dirtyPatches((unsigned)(numPatches_.x_ * numPatches_.y_));
     for (unsigned i = 0; i < dirtyPatches.Size(); ++i)
         dirtyPatches[i] = updateAll;
 
@@ -684,10 +943,11 @@ void Terrain::CreateGeometry()
         float* dest = smoothing_ ? sourceHeightData_ : heightData_;
         unsigned imgComps = heightMap_->GetComponents();
         unsigned imgRow = heightMap_->GetWidth() * imgComps;
+        IntRect updateRegion(-1, -1, -1, -1);
 
         if (imgComps == 1)
         {
-            PROFILE(CopyHeightData);
+            URHO3D_PROFILE(CopyHeightData);
 
             for (int z = 0; z < numVertices_.y_; ++z)
             {
@@ -701,16 +961,8 @@ void Terrain::CreateGeometry()
                     {
                         if (*dest != newHeight)
                         {
-                            if (!smoothing_)
-                                MarkPatchesDirty(dirtyPatches, x, z);
-                            else
-                            {
-                                for (int z1 = z - 1; z1 <= z + 1; ++z1)
-                                    for (int x1 = x - 1; x1 <= z + 1; ++x1)
-                                        MarkPatchesDirty(dirtyPatches, x1, z1);
-                            }
-
                             *dest = newHeight;
+                            GrowUpdateRegion(updateRegion, x, z);
                         }
                     }
 
@@ -720,15 +972,15 @@ void Terrain::CreateGeometry()
         }
         else
         {
-            PROFILE(CopyHeightData);
+            URHO3D_PROFILE(CopyHeightData);
 
             // If more than 1 component, use the green channel for more accuracy
             for (int z = 0; z < numVertices_.y_; ++z)
             {
                 for (int x = 0; x < numVertices_.x_; ++x)
                 {
-                    float newHeight = ((float)src[imgRow * (numVertices_.y_ - 1 - z) + imgComps * x] + (float)src[imgRow *
-                        (numVertices_.y_ - 1 - z) + imgComps * x + 1] / 256.0f) * spacing_.y_;
+                    float newHeight = ((float)src[imgRow * (numVertices_.y_ - 1 - z) + imgComps * x] +
+                                       (float)src[imgRow * (numVertices_.y_ - 1 - z) + imgComps * x + 1] / 256.0f) * spacing_.y_;
 
                     if (updateAll)
                         *dest = newHeight;
@@ -736,16 +988,8 @@ void Terrain::CreateGeometry()
                     {
                         if (*dest != newHeight)
                         {
-                            if (!smoothing_)
-                                MarkPatchesDirty(dirtyPatches, x, z);
-                            else
-                            {
-                                for (int z1 = z - 1; z1 <= z + 1; ++z1)
-                                    for (int x1 = x - 1; x1 <= z + 1; ++x1)
-                                        MarkPatchesDirty(dirtyPatches, x1, z1);
-                            }
-
                             *dest = newHeight;
+                            GrowUpdateRegion(updateRegion, x, z);
                         }
                     }
 
@@ -754,12 +998,33 @@ void Terrain::CreateGeometry()
             }
         }
 
-        patches_.Reserve(numPatches_.x_ * numPatches_.y_);
+        // If updating a region of the heightmap, check which patches change
+        if (!updateAll)
+        {
+            int lodExpand = 1u << (numLodLevels_ - 1);
+            // Expand the right & bottom 1 pixel more, as patches share vertices at the edge
+            updateRegion.left_ -= lodExpand;
+            updateRegion.right_ += lodExpand + 1;
+            updateRegion.top_ -= lodExpand;
+            updateRegion.bottom_ += lodExpand + 1;
+
+            int sX = Max(updateRegion.left_ / patchSize_, 0);
+            int eX = Min(updateRegion.right_ / patchSize_, numPatches_.x_ - 1);
+            int sY = Max(updateRegion.top_ / patchSize_, 0);
+            int eY = Min(updateRegion.bottom_ / patchSize_, numPatches_.y_ - 1);
+            for (int y = sY; y <= eY; ++y)
+            {
+                for (int x = sX; x <= eX; ++x)
+                    dirtyPatches[y * numPatches_.x_ + x] = true;
+            }
+        }
+
+        patches_.Reserve((unsigned)(numPatches_.x_ * numPatches_.y_));
 
         bool enabled = IsEnabledEffective();
 
         {
-            PROFILE(CreatePatches);
+            URHO3D_PROFILE(CreatePatches);
 
             // Create patches and set node transforms
             for (int z = 0; z < numPatches_.y_; ++z)
@@ -773,14 +1038,13 @@ void Terrain::CreateGeometry()
                     {
                         // Create the patch scene node as local and temporary so that it is not unnecessarily serialized to either
                         // file or replicated over the network
-                        patchNode = node_->CreateChild(nodeName, LOCAL);
-                        patchNode->SetTemporary(true);
+                        patchNode = node_->CreateTemporaryChild(nodeName, LOCAL);
                     }
 
-                    patchNode->SetPosition(Vector3(patchWorldOrigin_.x_ + (float)x * patchWorldSize_.x_, 0.0f, patchWorldOrigin_.y_ +
-                        (float)z * patchWorldSize_.y_));
+                    patchNode->SetPosition(Vector3(patchWorldOrigin_.x_ + (float)x * patchWorldSize_.x_, 0.0f,
+                        patchWorldOrigin_.y_ + (float)z * patchWorldSize_.y_));
 
-                    TerrainPatch* patch = patchNode->GetComponent<TerrainPatch>();
+                    auto* patch = patchNode->GetComponent<TerrainPatch>();
                     if (!patch)
                     {
                         patch = patchNode->CreateComponent<TerrainPatch>();
@@ -815,7 +1079,7 @@ void Terrain::CreateGeometry()
         // Create vertex data for patches. First update smoothing to ensure normals are calculated correctly across patch borders
         if (smoothing_)
         {
-            PROFILE(UpdateSmoothing);
+            URHO3D_PROFILE(UpdateSmoothing);
 
             for (unsigned i = 0; i < patches_.Size(); ++i)
             {
@@ -855,7 +1119,7 @@ void Terrain::CreateGeometry()
                 CalculateLodErrors(patch);
             }
 
-            SetNeighbors(patch);
+            SetPatchNeighbors(patch);
         }
     }
 
@@ -872,11 +1136,11 @@ void Terrain::CreateGeometry()
 
 void Terrain::CreateIndexData()
 {
-    PROFILE(CreateIndexData);
+    URHO3D_PROFILE(CreateIndexData);
 
     PODVector<unsigned short> indices;
     drawRanges_.Clear();
-    unsigned row = patchSize_ + 1;
+    auto row = (unsigned)(patchSize_ + 1);
 
     /* Build index data for each LOD level. Each LOD level except the lowest can stitch to the next lower LOD from the edges:
        north, south, west, east, or any combination of them, requiring 16 different versions of each LOD level's index data
@@ -892,7 +1156,7 @@ void Terrain::CreateIndexData()
     for (unsigned i = 0; i < numLodLevels_; ++i)
     {
         unsigned combinations = (i < numLodLevels_ - 1) ? 16 : 1;
-        int skip = 1 << i;
+        int skip = 1u << i;
 
         for (unsigned j = 0; j < combinations; ++j)
         {
@@ -917,12 +1181,12 @@ void Terrain::CreateIndexData()
             {
                 for (int x = xStart; x < xEnd; x += skip)
                 {
-                    indices.Push((z + skip) * row + x);
-                    indices.Push(z * row + x + skip);
-                    indices.Push(z * row + x);
-                    indices.Push((z + skip) * row + x);
-                    indices.Push((z + skip) * row + x + skip);
-                    indices.Push(z * row + x + skip);
+                    indices.Push((unsigned short)((z + skip) * row + x));
+                    indices.Push((unsigned short)(z * row + x + skip));
+                    indices.Push((unsigned short)(z * row + x));
+                    indices.Push((unsigned short)((z + skip) * row + x));
+                    indices.Push((unsigned short)((z + skip) * row + x + skip));
+                    indices.Push((unsigned short)(z * row + x + skip));
                 }
             }
 
@@ -934,18 +1198,18 @@ void Terrain::CreateIndexData()
                 {
                     if (x > 0 || (j & STITCH_WEST) == 0)
                     {
-                        indices.Push((z + skip) * row + x);
-                        indices.Push(z * row + x + skip);
-                        indices.Push(z * row + x);
+                        indices.Push((unsigned short)((z + skip) * row + x));
+                        indices.Push((unsigned short)(z * row + x + skip));
+                        indices.Push((unsigned short)(z * row + x));
                     }
-                    indices.Push((z + skip) * row + x);
-                    indices.Push((z + skip) * row + x + 2 * skip);
-                    indices.Push(z * row + x + skip);
+                    indices.Push((unsigned short)((z + skip) * row + x));
+                    indices.Push((unsigned short)((z + skip) * row + x + 2 * skip));
+                    indices.Push((unsigned short)(z * row + x + skip));
                     if (x < patchSize_ - skip * 2 || (j & STITCH_EAST) == 0)
                     {
-                        indices.Push((z + skip) * row + x + 2 * skip);
-                        indices.Push(z * row + x + 2 * skip);
-                        indices.Push(z * row + x + skip);
+                        indices.Push((unsigned short)((z + skip) * row + x + 2 * skip));
+                        indices.Push((unsigned short)(z * row + x + 2 * skip));
+                        indices.Push((unsigned short)(z * row + x + skip));
                     }
                 }
             }
@@ -958,18 +1222,18 @@ void Terrain::CreateIndexData()
                 {
                     if (x > 0 || (j & STITCH_WEST) == 0)
                     {
-                        indices.Push((z + skip) * row + x);
-                        indices.Push((z + skip) * row + x + skip);
-                        indices.Push(z * row + x);
+                        indices.Push((unsigned short)((z + skip) * row + x));
+                        indices.Push((unsigned short)((z + skip) * row + x + skip));
+                        indices.Push((unsigned short)(z * row + x));
                     }
-                    indices.Push(z * row + x);
-                    indices.Push((z + skip) * row + x + skip);
-                    indices.Push(z * row + x + 2 * skip);
+                    indices.Push((unsigned short)(z * row + x));
+                    indices.Push((unsigned short)((z + skip) * row + x + skip));
+                    indices.Push((unsigned short)(z * row + x + 2 * skip));
                     if (x < patchSize_ - skip * 2 || (j & STITCH_EAST) == 0)
                     {
-                        indices.Push((z + skip) * row + x + skip);
-                        indices.Push((z + skip) * row + x + 2 * skip);
-                        indices.Push(z * row + x + 2 * skip);
+                        indices.Push((unsigned short)((z + skip) * row + x + skip));
+                        indices.Push((unsigned short)((z + skip) * row + x + 2 * skip));
+                        indices.Push((unsigned short)(z * row + x + 2 * skip));
                     }
                 }
             }
@@ -982,18 +1246,18 @@ void Terrain::CreateIndexData()
                 {
                     if (z > 0 || (j & STITCH_SOUTH) == 0)
                     {
-                        indices.Push(z * row + x);
-                        indices.Push((z + skip) * row + x + skip);
-                        indices.Push(z * row + x + skip);
+                        indices.Push((unsigned short)(z * row + x));
+                        indices.Push((unsigned short)((z + skip) * row + x + skip));
+                        indices.Push((unsigned short)(z * row + x + skip));
                     }
-                    indices.Push((z + 2 * skip) * row + x);
-                    indices.Push((z + skip) * row + x + skip);
-                    indices.Push(z * row + x);
-                    if (x < patchSize_ - skip * 2 || (j & STITCH_NORTH) == 0)
+                    indices.Push((unsigned short)((z + 2 * skip) * row + x));
+                    indices.Push((unsigned short)((z + skip) * row + x + skip));
+                    indices.Push((unsigned short)(z * row + x));
+                    if (z < patchSize_ - skip * 2 || (j & STITCH_NORTH) == 0)
                     {
-                        indices.Push((z + 2 * skip) * row + x);
-                        indices.Push((z + 2 * skip) * row + x + skip);
-                        indices.Push((z + skip) * row + x + skip);
+                        indices.Push((unsigned short)((z + 2 * skip) * row + x));
+                        indices.Push((unsigned short)((z + 2 * skip) * row + x + skip));
+                        indices.Push((unsigned short)((z + skip) * row + x + skip));
                     }
                 }
             }
@@ -1006,18 +1270,18 @@ void Terrain::CreateIndexData()
                 {
                     if (z > 0 || (j & STITCH_SOUTH) == 0)
                     {
-                        indices.Push(z * row + x);
-                        indices.Push((z + skip) * row + x);
-                        indices.Push(z * row + x + skip);
+                        indices.Push((unsigned short)(z * row + x));
+                        indices.Push((unsigned short)((z + skip) * row + x));
+                        indices.Push((unsigned short)(z * row + x + skip));
                     }
-                    indices.Push((z + skip) * row + x);
-                    indices.Push((z + 2 * skip) * row + x + skip);
-                    indices.Push(z * row + x + skip);
+                    indices.Push((unsigned short)((z + skip) * row + x));
+                    indices.Push((unsigned short)((z + 2 * skip) * row + x + skip));
+                    indices.Push((unsigned short)(z * row + x + skip));
                     if (z < patchSize_ - skip * 2 || (j & STITCH_NORTH) == 0)
                     {
-                        indices.Push((z + skip) * row + x);
-                        indices.Push((z + 2 * skip) * row + x);
-                        indices.Push((z + 2 * skip) * row + x + skip);
+                        indices.Push((unsigned short)((z + skip) * row + x));
+                        indices.Push((unsigned short)((z + 2 * skip) * row + x));
+                        indices.Push((unsigned short)((z + 2 * skip) * row + x + skip));
                     }
                 }
             }
@@ -1052,10 +1316,9 @@ float Terrain::GetSourceHeight(int x, int z) const
 
 float Terrain::GetLodHeight(int x, int z, unsigned lodLevel) const
 {
-    unsigned offset = 1 << lodLevel;
-    float divisor = (float)offset;
-    float xFrac = (float)(x % offset) / divisor;
-    float zFrac = (float)(z % offset) / divisor;
+    unsigned offset = 1u << lodLevel;
+    auto xFrac = (float)(x % offset) / offset;
+    auto zFrac = (float)(z % offset) / offset;
     float h1, h2, h3;
 
     if (xFrac + zFrac >= 1.0f)
@@ -1090,18 +1353,18 @@ Vector3 Terrain::GetRawNormal(int x, int z) const
     float up = 0.5f * (spacing_.x_ + spacing_.z_);
 
     return (Vector3(0.0f, up, nSlope) +
-        Vector3(-neSlope, up, neSlope) +
-        Vector3(-eSlope, up, 0.0f) +
-        Vector3(-seSlope, up, -seSlope) +
-        Vector3(0.0f, up, -sSlope) +
-        Vector3(swSlope, up, -swSlope) +
-        Vector3(wSlope, up, 0.0f) +
-        Vector3(nwSlope, up, nwSlope)).Normalized();
+            Vector3(-neSlope, up, neSlope) +
+            Vector3(-eSlope, up, 0.0f) +
+            Vector3(-seSlope, up, -seSlope) +
+            Vector3(0.0f, up, -sSlope) +
+            Vector3(swSlope, up, -swSlope) +
+            Vector3(wSlope, up, 0.0f) +
+            Vector3(nwSlope, up, nwSlope)).Normalized();
 }
 
 void Terrain::CalculateLodErrors(TerrainPatch* patch)
 {
-    PROFILE(CalculateLodErrors);
+    URHO3D_PROFILE(CalculateLodErrors);
 
     const IntVector2& coords = patch->GetCoordinates();
     PODVector<float>& lodErrors = patch->GetLodErrors();
@@ -1116,7 +1379,7 @@ void Terrain::CalculateLodErrors(TerrainPatch* patch)
     for (unsigned i = 0; i < numLodLevels_; ++i)
     {
         float maxError = 0.0f;
-        int divisor = 1 << i;
+        int divisor = 1u << i;
 
         if (i > 0)
         {
@@ -1133,25 +1396,28 @@ void Terrain::CalculateLodErrors(TerrainPatch* patch)
             }
 
             // Set error to be at least same as (half vertex spacing x LOD) to prevent horizontal stretches getting too inaccurate
-            maxError = Max(maxError, 0.25f * (spacing_.x_ + spacing_.z_) * (float)(1 << i));
+            maxError = Max(maxError, 0.25f * (spacing_.x_ + spacing_.z_) * (float)(1u << i));
         }
 
         lodErrors.Push(maxError);
     }
 }
 
-void Terrain::SetNeighbors(TerrainPatch* patch)
+void Terrain::SetPatchNeighbors(TerrainPatch* patch)
 {
+    if (!patch)
+        return;
+
     const IntVector2& coords = patch->GetCoordinates();
-    patch->SetNeighbors(GetPatch(coords.x_, coords.y_ + 1), GetPatch(coords.x_, coords.y_ - 1),
-        GetPatch(coords.x_ - 1, coords.y_), GetPatch(coords.x_ + 1, coords.y_));
+    patch->SetNeighbors(GetNeighborPatch(coords.x_, coords.y_ + 1), GetNeighborPatch(coords.x_, coords.y_ - 1),
+        GetNeighborPatch(coords.x_ - 1, coords.y_), GetNeighborPatch(coords.x_ + 1, coords.y_));
 }
 
 bool Terrain::SetHeightMapInternal(Image* image, bool recreateNow)
 {
     if (image && image->IsCompressed())
     {
-        LOGERROR("Can not use a compressed image as a terrain heightmap");
+        URHO3D_LOGERROR("Can not use a compressed image as a terrain heightmap");
         return false;
     }
 
@@ -1159,7 +1425,7 @@ bool Terrain::SetHeightMapInternal(Image* image, bool recreateNow)
     if (heightMap_)
         UnsubscribeFromEvent(heightMap_, E_RELOADFINISHED);
     if (image)
-        SubscribeToEvent(image, E_RELOADFINISHED, HANDLER(Terrain, HandleHeightMapReloadFinished));
+        SubscribeToEvent(image, E_RELOADFINISHED, URHO3D_HANDLER(Terrain, HandleHeightMapReloadFinished));
 
     heightMap_ = image;
 
@@ -1171,29 +1437,33 @@ bool Terrain::SetHeightMapInternal(Image* image, bool recreateNow)
     return true;
 }
 
-void Terrain::HandleHeightMapReloadFinished(StringHash eventType, VariantMap& eventData)
+void Terrain::HandleHeightMapReloadFinished(StringHash /*eventType*/, VariantMap& eventData)
 {
     CreateGeometry();
 }
 
-void Terrain::MarkPatchesDirty(PODVector<bool>& dirtyPatches, int x, int z)
+void Terrain::HandleNeighborTerrainCreated(StringHash /*eventType*/, VariantMap& eventData)
 {
-    x = Clamp(x, 0, numVertices_.x_);
-    z = Clamp(z, 0, numVertices_.y_);
+    UpdateEdgePatchNeighbors();
+}
 
-    // A point on the heightmap can potentially belong to multiple patches; dirty all that are applicable
-    int pZ = z / patchSize_;
-    int vZ = z % patchSize_;
-    int pX = x / patchSize_;
-    int vX = x % patchSize_;
-    if (pZ < numPatches_.y_ && pX < numPatches_.x_)
-        dirtyPatches[pZ * numPatches_.x_ + pX] = true;
-    if (vX == 0 && pX > 0 && pZ < numPatches_.y_)
-        dirtyPatches[pZ * numPatches_.x_ + pX - 1] = true;
-    if (vZ == 0 && pZ > 0 && pX < numPatches_.y_)
-        dirtyPatches[(pZ - 1) * numPatches_.x_ + pX] = true;
-    if (vX == 0 && vZ == 0 && pX > 0 && pZ > 0)
-        dirtyPatches[(pZ - 1) * numPatches_.x_ + pX - 1] = true;
+void Terrain::UpdateEdgePatchNeighbors()
+{
+    for (int x = 1; x < numPatches_.x_ - 1; ++x)
+    {
+        SetPatchNeighbors(GetPatch(x, 0));
+        SetPatchNeighbors(GetPatch(x, numPatches_.y_ - 1));
+    }
+    for (int z = 1; z < numPatches_.y_ - 1; ++z)
+    {
+        SetPatchNeighbors(GetPatch(0, z));
+        SetPatchNeighbors(GetPatch(numPatches_.x_ - 1, z));
+    }
+
+    SetPatchNeighbors(GetPatch(0, 0));
+    SetPatchNeighbors(GetPatch(numPatches_.x_ - 1, 0));
+    SetPatchNeighbors(GetPatch(0, numPatches_.y_ - 1));
+    SetPatchNeighbors(GetPatch(numPatches_.x_ - 1, numPatches_.y_ - 1));
 }
 
 }

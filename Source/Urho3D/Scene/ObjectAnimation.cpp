@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,15 @@
 // THE SOFTWARE.
 //
 
+#include "../Precompiled.h"
+
 #include "../Core/Context.h"
+#include "../Resource/XMLFile.h"
+#include "../Resource/JSONFile.h"
 #include "../Scene/ObjectAnimation.h"
 #include "../Scene/SceneEvents.h"
 #include "../Scene/ValueAnimation.h"
 #include "../Scene/ValueAnimationInfo.h"
-#include "../Resource/XMLFile.h"
 
 #include "../DebugNew.h"
 
@@ -37,7 +40,7 @@ const char* wrapModeNames[] =
     "Loop",
     "Once",
     "Clamp",
-    0
+    nullptr
 };
 
 ObjectAnimation::ObjectAnimation(Context* context) :
@@ -45,9 +48,7 @@ ObjectAnimation::ObjectAnimation(Context* context) :
 {
 }
 
-ObjectAnimation::~ObjectAnimation()
-{
-}
+ObjectAnimation::~ObjectAnimation() = default;
 
 void ObjectAnimation::RegisterObject(Context* context)
 {
@@ -83,7 +84,7 @@ bool ObjectAnimation::LoadXML(const XMLElement& source)
     while (animElem)
     {
         String name = animElem.GetAttribute("name");
-        
+
         SharedPtr<ValueAnimation> animation(new ValueAnimation(context_));
         if (!animation->LoadXML(animElem))
             return false;
@@ -110,7 +111,8 @@ bool ObjectAnimation::LoadXML(const XMLElement& source)
 
 bool ObjectAnimation::SaveXML(XMLElement& dest) const
 {
-    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin(); i != attributeAnimationInfos_.End(); ++i)
+    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin();
+         i != attributeAnimationInfos_.End(); ++i)
     {
         XMLElement animElem = dest.CreateChild("attributeanimation");
         animElem.SetAttribute("name", i->first_);
@@ -123,6 +125,68 @@ bool ObjectAnimation::SaveXML(XMLElement& dest) const
         animElem.SetFloat("speed", info->GetSpeed());
     }
 
+    return true;
+}
+
+bool ObjectAnimation::LoadJSON(const JSONValue& source)
+{
+    attributeAnimationInfos_.Clear();
+
+    JSONValue attributeAnimationsValue = source.Get("attributeanimations");
+    if (attributeAnimationsValue.IsNull())
+        return true;
+    if (!attributeAnimationsValue.IsObject())
+        return true;
+
+    const JSONObject& attributeAnimationsObject = attributeAnimationsValue.GetObject();
+
+    for (JSONObject::ConstIterator it = attributeAnimationsObject.Begin(); it != attributeAnimationsObject.End(); it++)
+    {
+        String name = it->first_;
+        JSONValue value = it->second_;
+        SharedPtr<ValueAnimation> animation(new ValueAnimation(context_));
+        if (!animation->LoadJSON(value))
+            return false;
+
+        String wrapModeString = value.Get("wrapmode").GetString();
+        WrapMode wrapMode = WM_LOOP;
+        for (int i = 0; i <= WM_CLAMP; ++i)
+        {
+            if (wrapModeString == wrapModeNames[i])
+            {
+                wrapMode = (WrapMode)i;
+                break;
+            }
+        }
+
+        float speed = value.Get("speed").GetFloat();
+        AddAttributeAnimation(name, animation, wrapMode, speed);
+    }
+
+    return true;
+}
+
+bool ObjectAnimation::SaveJSON(JSONValue& dest) const
+{
+    JSONValue attributeAnimationsValue;
+
+    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Begin();
+         i != attributeAnimationInfos_.End(); ++i)
+    {
+        JSONValue animValue;
+        animValue.Set("name", i->first_);
+
+        const ValueAnimationInfo* info = i->second_;
+        if (!info->GetAnimation()->SaveJSON(animValue))
+            return false;
+
+        animValue.Set("wrapmode", wrapModeNames[info->GetWrapMode()]);
+        animValue.Set("speed", (float) info->GetSpeed());
+
+        attributeAnimationsValue.Set(i->first_, animValue);
+    }
+
+    dest.Set("attributeanimations", attributeAnimationsValue);
     return true;
 }
 
@@ -144,7 +208,7 @@ void ObjectAnimation::RemoveAttributeAnimation(const String& name)
     {
         SendAttributeAnimationRemovedEvent(name);
 
-        i->second_->GetAnimation()->SetOwner(0);
+        i->second_->GetAnimation()->SetOwner(nullptr);
         attributeAnimationInfos_.Erase(i);
     }
 }
@@ -153,14 +217,15 @@ void ObjectAnimation::RemoveAttributeAnimation(ValueAnimation* attributeAnimatio
 {
     if (!attributeAnimation)
         return;
-    
-    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::Iterator i = attributeAnimationInfos_.Begin(); i != attributeAnimationInfos_.End(); ++i)
+
+    for (HashMap<String, SharedPtr<ValueAnimationInfo> >::Iterator i = attributeAnimationInfos_.Begin();
+         i != attributeAnimationInfos_.End(); ++i)
     {
         if (i->second_->GetAnimation() == attributeAnimation)
         {
             SendAttributeAnimationRemovedEvent(i->first_);
 
-            attributeAnimation->SetOwner(0);
+            attributeAnimation->SetOwner(nullptr);
             attributeAnimationInfos_.Erase(i);
             return;
         }
@@ -170,7 +235,7 @@ void ObjectAnimation::RemoveAttributeAnimation(ValueAnimation* attributeAnimatio
 ValueAnimation* ObjectAnimation::GetAttributeAnimation(const String& name) const
 {
     ValueAnimationInfo* info = GetAttributeAnimationInfo(name);
-    return info ? info->GetAnimation() : 0;
+    return info ? info->GetAnimation() : nullptr;
 }
 
 WrapMode ObjectAnimation::GetAttributeAnimationWrapMode(const String& name) const
@@ -190,7 +255,7 @@ ValueAnimationInfo* ObjectAnimation::GetAttributeAnimationInfo(const String& nam
     HashMap<String, SharedPtr<ValueAnimationInfo> >::ConstIterator i = attributeAnimationInfos_.Find(name);
     if (i != attributeAnimationInfos_.End())
         return i->second_;
-    return 0;
+    return nullptr;
 }
 
 void ObjectAnimation::SendAttributeAnimationAddedEvent(const String& name)

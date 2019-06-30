@@ -10,6 +10,8 @@ Array<QuickMenuItem@> quickMenuItems;
 FileSelector@ uiFileSelector;
 String consoleCommandInterpreter;
 Window@ contextMenu;
+uint stepColoringGroupUpdate = 100; // ms
+uint timeToNextColoringGroupUpdate = 0;
 
 const StringHash UI_ELEMENT_TYPE("UIElement");
 const StringHash WINDOW_TYPE("Window");
@@ -19,6 +21,7 @@ const StringHash CURSOR_TYPE("Cursor");
 
 const String AUTO_STYLE("");    // Empty string means auto style, i.e. applying style according to UI-element's type automatically
 const String TEMP_SCENE_NAME("_tempscene_.xml");
+const String TEMP_BINARY_SCENE_NAME("_tempscene_.bin");
 const StringHash CALLBACK_VAR("Callback");
 const StringHash INDENT_MODIFIED_BY_ICON_VAR("IconIndented");
 
@@ -29,12 +32,13 @@ const uint MAX_QUICK_MENU_ITEMS = 10;
 
 const uint maxRecentSceneCount = 5;
 
-Array<String> uiSceneFilters = {"*.xml", "*.bin", "*.*"};
+Array<String> uiSceneFilters = {"*.xml", "*.json", "*.bin", "*.*"};
 Array<String> uiElementFilters = {"*.xml"};
 Array<String> uiAllFilters = {"*.*"};
 Array<String> uiScriptFilters = {"*.as", "*.*"};
 Array<String> uiParticleFilters = {"*.xml"};
 Array<String> uiRenderPathFilters = {"*.xml"};
+Array<String> uiExportPathFilters = {"*.obj"};
 uint uiSceneFilter = 0;
 uint uiElementFilter = 0;
 uint uiNodeFilter = 0;
@@ -42,10 +46,12 @@ uint uiImportFilter = 0;
 uint uiScriptFilter = 0;
 uint uiParticleFilter = 0;
 uint uiRenderPathFilter = 0;
+uint uiExportFilter = 0;
 String uiScenePath = fileSystem.programDir + "Data/Scenes";
 String uiElementPath = fileSystem.programDir + "Data/UI";
 String uiNodePath = fileSystem.programDir + "Data/Objects";
 String uiImportPath;
+String uiExportPath;
 String uiScriptPath = fileSystem.programDir + "Data/Scripts";
 String uiParticlePath = fileSystem.programDir + "Data/Particles";
 String uiRenderPathPath = fileSystem.programDir + "CoreData/RenderPaths";
@@ -57,6 +63,8 @@ float uiMinOpacity = 0.3;
 float uiMaxOpacity = 0.7;
 bool uiHidden = false;
 
+TerrainEditor terrainEditor;
+
 void CreateUI()
 {
     // Remove all existing UI content in case we are reloading the editor script
@@ -66,6 +74,8 @@ void CreateUI()
     uiStyle = GetEditorUIXMLFile("UI/DefaultStyle.xml");
     ui.root.defaultStyle = uiStyle;
     iconStyle = GetEditorUIXMLFile("UI/EditorIcons.xml");
+    
+    graphics.windowIcon = cache.GetResource("Image", "Textures/UrhoIcon.png");
 
     CreateCursor();
     CreateMenuBar();
@@ -86,12 +96,18 @@ void CreateUI()
     CreateDebugHud();
     CreateResourceBrowser();
     CreateCamera();
+    CreateLayerEditor();
+    CreateColorWheel();
+
+	terrainEditor.Create();
 
     SubscribeToEvent("ScreenMode", "ResizeUI");
     SubscribeToEvent("MenuSelected", "HandleMenuSelected");
-    SubscribeToEvent("KeyDown", "HandleKeyDown");
-    SubscribeToEvent("KeyUp", "UnfadeUI");
-    SubscribeToEvent("MouseButtonUp", "UnfadeUI");
+    SubscribeToEvent("ChangeLanguage", "HandleChangeLanguage");
+
+    SubscribeToEvent("WheelChangeColor", "HandleWheelChangeColor");
+    SubscribeToEvent("WheelSelectColor", "HandleWheelSelectColor");
+    SubscribeToEvent("WheelDiscardColor", "HandleWheelDiscardColor");
 }
 
 void ResizeUI()
@@ -105,19 +121,6 @@ void ResizeUI()
     // Resize secondary tool bar
     secondaryToolBar.SetFixedHeight(graphics.height);
 
-    // Relayout stats bar
-    Font@ font = cache.GetResource("Font", "Fonts/Anonymous Pro.ttf");
-    if (graphics.width >= 1200)
-    {
-        SetupStatsBarText(editorModeText, font, 35, 64, HA_LEFT, VA_TOP);
-        SetupStatsBarText(renderStatsText, font, -4, 64, HA_RIGHT, VA_TOP);
-    }
-    else
-    {
-        SetupStatsBarText(editorModeText, font, 35, 64, HA_LEFT, VA_TOP);
-        SetupStatsBarText(renderStatsText, font, 35, 78, HA_LEFT, VA_TOP);
-    }
-
     // Relayout windows
     Array<UIElement@> children = ui.root.GetChildren();
     for (uint i = 0; i < children.length; ++i)
@@ -128,7 +131,7 @@ void ResizeUI()
 
     // Relayout root UI element
     editorUIElement.SetSize(graphics.width, graphics.height);
-    
+
     // Set new viewport area and reset the viewport layout
     viewportArea = IntRect(0, 0, graphics.width, graphics.height);
     SetViewportMode(viewportMode);
@@ -168,6 +171,40 @@ void HandleQuickSearchChange(StringHash eventType, VariantMap& eventData)
         return;
 
     PerformQuickMenuSearch(search.text.ToLower().Trimmed());
+}
+
+void HandleQuickSearchFinish(StringHash eventType, VariantMap& eventData)
+{
+    Menu@ menu = quickMenu.GetChild("ResultsMenu", true);
+    if (menu is null)
+        return;
+
+    String query = eventData["Text"].GetString();
+    if (query.length <= 0)
+        return;
+    Array<QuickMenuItem@> filtered;
+    {
+        QuickMenuItem@ qi;
+        for (uint x=0; x < quickMenuItems.length; x++)
+        {
+            @qi = quickMenuItems[x];
+            int find = qi.action.Find(query, 0, false);
+            if (find > -1)
+            {
+                qi.sortScore = find;
+                filtered.Push(qi);
+            }
+        }
+    }
+
+    filtered.Sort();
+    if (!filtered.empty)
+    {
+        VariantMap data;
+        Menu@ item = CreateMenuItem(filtered[0].action, filtered[0].callback);
+        data["Element"] = item;
+        item.SendEvent("MenuSelected", data);
+    }
 }
 
 void PerformQuickMenuSearch(const String&in query)
@@ -248,13 +285,14 @@ void CreateQuickMenu()
     quickMenu.enabled = false;
     quickMenu.visible = false;
     quickMenu.opacity = uiMaxOpacity;
-    
+
     // Handle a dummy search in the quick menu to finalize its initial size to empty
     PerformQuickMenuSearch("");
 
     ui.root.AddChild(quickMenu);
     LineEdit@ search = quickMenu.GetChild("Search", true);
     SubscribeToEvent(search, "TextChanged", "HandleQuickSearchChange");
+    SubscribeToEvent(search, "TextFinished", "HandleQuickSearchFinish");
     UIElement@ closeButton = quickMenu.GetChild("CloseButton", true);
     SubscribeToEvent(closeButton, "Pressed", "ToggleQuickMenu");
 }
@@ -286,17 +324,17 @@ void CreateMenuBar()
     {
         Menu@ menu = CreateMenu("File");
         Window@ popup = menu.popup;
-        popup.AddChild(CreateMenuItem("New scene", @ResetScene, 'N', QUAL_SHIFT | QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Open scene...", @PickFile, 'O', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Save scene", @SaveSceneWithExistingName, 'S', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Save scene as...", @PickFile, 'S', QUAL_SHIFT | QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("New scene", @ResetScene, KEY_N, QUAL_SHIFT | QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Open scene...", @PickFile, KEY_O, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Save scene", @SaveSceneWithExistingName, KEY_S, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Save scene as...", @PickFile, KEY_S, QUAL_SHIFT | QUAL_CTRL));
         recentSceneMenu = CreateMenuItem("Open recent scene", null, SHOW_POPUP_INDICATOR);
         popup.AddChild(recentSceneMenu);
         mruScenesPopup = CreatePopup(recentSceneMenu);
         PopulateMruScenes();
         CreateChildDivider(popup);
 
-        Menu@ childMenu = CreateMenuItem("Load node", null, SHOW_POPUP_INDICATOR);
+        Menu@ childMenu = CreateMenuItem("menu Load node", null, SHOW_POPUP_INDICATOR);
         Window@ childPopup = CreatePopup(childMenu);
         childPopup.AddChild(CreateMenuItem("As replicated...", @PickFile, 0, 0, true, "Load node as replicated..."));
         childPopup.AddChild(CreateMenuItem("As local...", @PickFile, 0, 0, true, "Load node as local..."));
@@ -306,6 +344,10 @@ void CreateMenuBar()
         CreateChildDivider(popup);
         popup.AddChild(CreateMenuItem("Import model...", @PickFile));
         popup.AddChild(CreateMenuItem("Import scene...", @PickFile));
+        popup.AddChild(CreateMenuItem("Import animation...", @PickFile));
+        CreateChildDivider(popup);
+        popup.AddChild(CreateMenuItem("Export scene to OBJ...", @PickFile));
+        popup.AddChild(CreateMenuItem("Export selected to OBJ...", @PickFile));
         CreateChildDivider(popup);
         popup.AddChild(CreateMenuItem("Run script...", @PickFile));
         popup.AddChild(CreateMenuItem("Set resource path...", @PickFile));
@@ -318,29 +360,99 @@ void CreateMenuBar()
     {
         Menu@ menu = CreateMenu("Edit");
         Window@ popup = menu.popup;
-        popup.AddChild(CreateMenuItem("Undo", @Undo, 'Z', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Redo", @Redo, 'Y', QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Undo", @Undo, KEY_Z, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Redo", @Redo, KEY_Y, QUAL_CTRL));
         CreateChildDivider(popup);
-        popup.AddChild(CreateMenuItem("Cut", @Cut, 'X', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Duplicate", @Duplicate, 'D', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Copy", @Copy, 'C', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Paste", @Paste, 'V', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Delete", @Delete, KEY_DELETE, QUAL_ANY));
-        popup.AddChild(CreateMenuItem("Select all", @SelectAll, 'A', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Deselect all", @DeselectAll, 'A', QUAL_SHIFT | QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Cut", @Cut, KEY_X, QUAL_CTRL));
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+            popup.AddChild(CreateMenuItem("Duplicate", @Duplicate, KEY_D, QUAL_CTRL));
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+            popup.AddChild(CreateMenuItem("Duplicate", @Duplicate, KEY_D, QUAL_SHIFT));
+
+        popup.AddChild(CreateMenuItem("Copy", @Copy, KEY_C, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Paste", @Paste, KEY_V, QUAL_CTRL));
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+            popup.AddChild(CreateMenuItem("Delete", @Delete, KEY_DELETE, QUAL_ANY));
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+            popup.AddChild(CreateMenuItem("Delete", @BlenderModeDelete, KEY_X, QUAL_ANY));
+
+        popup.AddChild(CreateMenuItem("Select all", @SelectAll, KEY_A, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Deselect all", @DeselectAll, KEY_A, QUAL_SHIFT | QUAL_CTRL));
+
         CreateChildDivider(popup);
         popup.AddChild(CreateMenuItem("Reset to default", @ResetToDefault));
         CreateChildDivider(popup);
-        popup.AddChild(CreateMenuItem("Reset position", @SceneResetPosition));
-        popup.AddChild(CreateMenuItem("Reset rotation", @SceneResetRotation));
-        popup.AddChild(CreateMenuItem("Reset scale", @SceneResetScale));
-        popup.AddChild(CreateMenuItem("Enable/disable", @SceneToggleEnable, 'E', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Unparent", @SceneUnparent, 'U', QUAL_CTRL));
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+        {
+            popup.AddChild(CreateMenuItem("Reset position", @SceneResetPosition, '1' , QUAL_ALT));
+            popup.AddChild(CreateMenuItem("Reset rotation", @SceneResetRotation, '2' , QUAL_ALT));
+            popup.AddChild(CreateMenuItem("Reset scale", @SceneResetScale, '3' , QUAL_ALT));
+            popup.AddChild(CreateMenuItem("Reset transform", @SceneResetTransform, KEY_Q , QUAL_ALT));
+        }
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+        {
+            popup.AddChild(CreateMenuItem("Reset position", @SceneResetPosition, KEY_G , QUAL_ALT));
+            popup.AddChild(CreateMenuItem("Reset rotation", @SceneResetRotation, KEY_R, QUAL_ALT));
+            popup.AddChild(CreateMenuItem("Reset scale", @SceneResetScale, KEY_S, QUAL_ALT));
+            popup.AddChild(CreateMenuItem("Reset transform", @SceneResetTransform, KEY_Q , QUAL_ALT));
+        }
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+        {
+            popup.AddChild(CreateMenuItem("Enable/disable", @SceneToggleEnable, KEY_E, QUAL_CTRL));
+            popup.AddChild(CreateMenuItem("Enable all", @SceneEnableAllNodes, KEY_E, QUAL_ALT));
+        }
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+        {
+            popup.AddChild(CreateMenuItem("Enable/disable", @SceneToggleEnable, KEY_H));
+            popup.AddChild(CreateMenuItem("Enable all", @SceneEnableAllNodes, KEY_H, QUAL_ALT));
+        }
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+            popup.AddChild(CreateMenuItem("Unparent", @SceneUnparent, KEY_U, QUAL_CTRL));
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+            popup.AddChild(CreateMenuItem("Unparent", @SceneUnparent, KEY_P, QUAL_ALT));
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+            popup.AddChild(CreateMenuItem("Parent to last", @NodesParentToLastSelected, KEY_U));
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+            popup.AddChild(CreateMenuItem("Parent to last", @NodesParentToLastSelected, KEY_P, QUAL_CTRL));
+
         CreateChildDivider(popup);
-        popup.AddChild(CreateMenuItem("Toggle update", @ToggleSceneUpdate, 'P', QUAL_CTRL));
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+            popup.AddChild(CreateMenuItem("Toggle update", @ToggleSceneUpdate, KEY_P, QUAL_CTRL));
+        //else if (hotKeyMode == HOT_KEYS_MODE_BLENDER)
+        //    popup.AddChild(CreateMenuItem("Toggle update", @ToggleSceneUpdate, KEY_P, QUAL_CTRL));
+
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+        {
+            popup.AddChild(CreateMenuItem("View closer", @ViewCloser, KEY_F));
+        }
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+        {
+             popup.AddChild(CreateMenuItem("Move to layer", @ShowLayerMover, KEY_M));
+             popup.AddChild(CreateMenuItem("Smart Duplicate", @SceneSmartDuplicateNode, KEY_D, QUAL_ALT));
+             popup.AddChild(CreateMenuItem("View closer", @ViewCloser, KEY_KP_PERIOD));
+        }
+        popup.AddChild(CreateMenuItem("Color wheel", @ColorWheelBuildMenuSelectTypeColor, KEY_W, QUAL_ALT));
+        popup.AddChild(CreateMenuItem("Show components icons", @ViewDebugIcons, KEY_I, QUAL_ALT));
+
+        CreateChildDivider(popup);
+
         popup.AddChild(CreateMenuItem("Stop test animation", @StopTestAnimation));
         CreateChildDivider(popup);
         popup.AddChild(CreateMenuItem("Rebuild navigation data", @SceneRebuildNavigation));
+        popup.AddChild(CreateMenuItem("Render Zone Cubemap", @SceneRenderZoneCubemaps));
+        popup.AddChild(CreateMenuItem("Add children to SM-group", @SceneAddChildrenStaticModelGroup));
+        Menu@ childMenu = CreateMenuItem("Set children as spline path", null, SHOW_POPUP_INDICATOR);
+        Window@ childPopup = CreatePopup(childMenu);
+        childPopup.AddChild(CreateMenuItem("Non-cyclic", @SetSplinePath, 0, 0, true, "Set non-cyclic spline path"));
+        childPopup.AddChild(CreateMenuItem("Cyclic", @SetSplinePath, 0, 0, true, "Set cyclic spline path"));
+        popup.AddChild(childMenu);
         FinalizedPopupMenu(popup);
         uiMenuBar.AddChild(menu);
     }
@@ -361,12 +473,12 @@ void CreateMenuBar()
             if (objectCategories[i] == "UI")
                 continue;
 
-            Menu@ menu = CreateMenuItem(objectCategories[i], null, SHOW_POPUP_INDICATOR);
-            Window@ popup = CreatePopup(menu);
+            Menu@ m = CreateMenuItem(objectCategories[i], null, SHOW_POPUP_INDICATOR);
+            Window@ p = CreatePopup(m);
             String[] componentTypes = GetObjectsByCategory(objectCategories[i]);
             for (uint j = 0; j < componentTypes.length; ++j)
-                popup.AddChild(CreateIconizedMenuItem(componentTypes[j], @PickComponent, 0, 0, "", true, "Create " + componentTypes[j]));
-            childPopup.AddChild(menu);
+                p.AddChild(CreateIconizedMenuItem(componentTypes[j], @PickComponent, 0, 0, "", true, "Create " + componentTypes[j]));
+            childPopup.AddChild(m);
         }
         FinalizedPopupMenu(childPopup);
         popup.AddChild(childMenu);
@@ -398,11 +510,11 @@ void CreateMenuBar()
     {
         Menu@ menu = CreateMenu("UI-layout");
         Window@ popup = menu.popup;
-        popup.AddChild(CreateMenuItem("Open UI-layout...", @PickFile, 'O', QUAL_ALT));
-        popup.AddChild(CreateMenuItem("Save UI-layout", @SaveUILayoutWithExistingName, 'S', QUAL_ALT));
+        popup.AddChild(CreateMenuItem("Open UI-layout...", @PickFile, KEY_O, QUAL_ALT));
+        popup.AddChild(CreateMenuItem("Save UI-layout", @SaveUILayoutWithExistingName, KEY_S, QUAL_ALT));
         popup.AddChild(CreateMenuItem("Save UI-layout as...", @PickFile));
         CreateChildDivider(popup);
-        popup.AddChild(CreateMenuItem("Close UI-layout", @CloseUILayout, 'C', QUAL_ALT));
+        popup.AddChild(CreateMenuItem("Close UI-layout", @CloseUILayout, KEY_C, QUAL_ALT));
         popup.AddChild(CreateMenuItem("Close all UI-layouts", @CloseAllUILayouts));
         CreateChildDivider(popup);
         popup.AddChild(CreateMenuItem("Load child element...", @PickFile));
@@ -416,15 +528,16 @@ void CreateMenuBar()
     {
         Menu@ menu = CreateMenu("View");
         Window@ popup = menu.popup;
-        popup.AddChild(CreateMenuItem("Hierarchy", @ShowHierarchyWindow, 'H', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Attribute inspector", @ShowAttributeInspectorWindow, 'I', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Resource browser", @ShowResourceBrowserWindow, 'B', QUAL_CTRL));
-        popup.AddChild(CreateMenuItem("Material editor", @ShowMaterialEditor));
-        popup.AddChild(CreateMenuItem("Particle editor", @ShowParticleEffectEditor));
-        popup.AddChild(CreateMenuItem("Spawn editor", @ShowSpawnEditor));
-        popup.AddChild(CreateMenuItem("Sound Type editor", @ShowSoundTypeEditor));
-        popup.AddChild(CreateMenuItem("Editor settings", @ShowEditorSettingsDialog));
-        popup.AddChild(CreateMenuItem("Editor preferences", @ShowEditorPreferencesDialog));
+        popup.AddChild(CreateMenuItem("Hierarchy", @ToggleHierarchyWindow, KEY_H, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Attribute inspector", @ToggleAttributeInspectorWindow, KEY_I, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Resource browser", @ToggleResourceBrowserWindow, KEY_B, QUAL_CTRL));
+        popup.AddChild(CreateMenuItem("Material editor", @ToggleMaterialEditor));
+        popup.AddChild(CreateMenuItem("Particle editor", @ToggleParticleEffectEditor));
+        popup.AddChild(CreateMenuItem("Terrain editor", TerrainEditorShowCallback(terrainEditor.Show)));
+        popup.AddChild(CreateMenuItem("Spawn editor", @ToggleSpawnEditor));
+        popup.AddChild(CreateMenuItem("Sound Type editor", @ToggleSoundTypeEditor));
+        popup.AddChild(CreateMenuItem("Editor settings", @ToggleEditorSettingsDialog));
+        popup.AddChild(CreateMenuItem("Editor preferences", @ToggleEditorPreferencesDialog));
         CreateChildDivider(popup);
         popup.AddChild(CreateMenuItem("Hide editor", @ToggleUI, KEY_F12, QUAL_ANY));
         FinalizedPopupMenu(popup);
@@ -434,11 +547,6 @@ void CreateMenuBar()
     BorderImage@ spacer = BorderImage("MenuBarSpacer");
     uiMenuBar.AddChild(spacer);
     spacer.style = "EditorMenuBar";
-
-    BorderImage@ logo = BorderImage("Logo");
-    logo.texture = cache.GetResource("Texture2D", "Textures/Logo.png");
-    logo.SetFixedWidth(64);
-    uiMenuBar.AddChild(logo);
 }
 
 bool Exit()
@@ -515,7 +623,7 @@ bool PickFile()
     else if (action == "As replicated..." || action == "Load node as replicated...")
     {
         instantiateMode = REPLICATED;
-        CreateFileSelector("Load node", "Load", "Cancel", uiNodePath, uiSceneFilters, uiNodeFilter);
+        CreateFileSelector("fileSelector Load node", "Load", "Cancel", uiNodePath, uiSceneFilters, uiNodeFilter);
         SubscribeToEvent(uiFileSelector, "FileSelected", "HandleLoadNodeFile");
     }
     else if (action == "As local..." || action == "Load node as local...")
@@ -538,10 +646,65 @@ bool PickFile()
         CreateFileSelector("Import model", "Import", "Cancel", uiImportPath, uiAllFilters, uiImportFilter);
         SubscribeToEvent(uiFileSelector, "FileSelected", "HandleImportModel");
     }
+    else if (action == "Import animation...")
+    {
+        CreateFileSelector("Import animation", "Import", "Cancel", uiImportPath, uiAllFilters, uiImportFilter);
+        SubscribeToEvent(uiFileSelector, "FileSelected", "HandleImportAnimation");
+    }
     else if (action == "Import scene...")
     {
         CreateFileSelector("Import scene", "Import", "Cancel", uiImportPath, uiAllFilters, uiImportFilter);
         SubscribeToEvent(uiFileSelector, "FileSelected", "HandleImportScene");
+    }
+    else if (action == "Export scene to OBJ..." || action == "Export selected to OBJ...")
+    {
+        // Set these up together to share the "export settings" options
+        if (action == "Export scene to OBJ...")
+        {
+            CreateFileSelector("Export scene to OBJ", "Save", "Cancel", uiExportPath, uiExportPathFilters, uiExportFilter);
+            SubscribeToEvent(uiFileSelector, "FileSelected", "HandleExportSceneOBJ");
+        }
+        else if (action == "Export selected to OBJ...")
+        {
+            CreateFileSelector("Export selected to OBJ", "Save", "Cancel", uiExportPath, uiExportPathFilters, uiExportFilter);
+            SubscribeToEvent(uiFileSelector, "FileSelected", "HandleExportSelectedOBJ");
+        }
+
+        Window@ window = uiFileSelector.window;
+
+            UIElement@ optionsGroup = UIElement();
+            optionsGroup.maxHeight = 30;
+            optionsGroup.layoutMode = LM_HORIZONTAL;
+            window.defaultStyle = uiStyle;
+            window.style = AUTO_STYLE;
+
+                CheckBox@ checkRightHanded = CheckBox();
+                checkRightHanded.checked = objExportRightHanded_;
+                checkRightHanded.defaultStyle = uiStyle;
+                checkRightHanded.style = AUTO_STYLE;
+                SubscribeToEvent(checkRightHanded, "Toggled", "HandleOBJRightHandedChanged");
+                optionsGroup.AddChild(checkRightHanded);
+
+                    Text@ lblRightHanded = Text();
+                    lblRightHanded.defaultStyle = uiStyle;
+                    lblRightHanded.style = AUTO_STYLE;
+                    lblRightHanded.text = "  Right handed";
+                    optionsGroup.AddChild(lblRightHanded);
+
+                CheckBox@ checkZUp = CheckBox();
+                checkZUp.checked = objExportZUp_;
+                checkZUp.defaultStyle = uiStyle;
+                checkZUp.style = AUTO_STYLE;
+                SubscribeToEvent(checkZUp, "Toggled", "HandleOBJZUpChanged");
+                optionsGroup.AddChild(checkZUp);
+
+                    Text@ lblZUp = Text();
+                    lblZUp.defaultStyle = uiStyle;
+                    lblZUp.style = AUTO_STYLE;
+                    lblZUp.text = " Z Axis Up";
+                    optionsGroup.AddChild(lblZUp);
+
+            window.AddChild(optionsGroup);
     }
     else if (action == "Run script...")
     {
@@ -683,7 +846,7 @@ void HandleMenuSelected(StringHash eventType, VariantMap& eventData)
         menuCallbacks[variant.GetUInt()]();
 }
 
-Menu@ CreateMenuItem(const String&in title, MENU_CALLBACK@ callback = null, int accelKey = 0, int accelQual = 0, bool addToQuickMenu = true, String quickMenuText="")
+Menu@ CreateMenuItem(const String&in title, MENU_CALLBACK@ callback = null, int accelKey = 0, int accelQual = 0, bool addToQuickMenu = true, String quickMenuText="", bool autoLocalize = true)
 {
     Menu@ menu = Menu(title);
     menu.defaultStyle = uiStyle;
@@ -701,6 +864,7 @@ Menu@ CreateMenuItem(const String&in title, MENU_CALLBACK@ callback = null, int 
     menu.AddChild(menuText);
     menuText.style = "EditorMenuText";
     menuText.text = title;
+    menuText.autoLocalizable = autoLocalize;
 
     if (addToQuickMenu)
         AddQuickMenuItem(callback, quickMenuText.empty ? title : quickMenuText);
@@ -790,10 +954,29 @@ Window@ CreatePopup(Menu@ baseMenu)
 Menu@ CreateMenu(const String&in title)
 {
     Menu@ menu = CreateMenuItem(title);
-    menu.SetFixedWidth(menu.width);
+    Text@ text = menu.children[0];
+    menu.maxWidth = text.width + 20;
     CreatePopup(menu);
 
     return menu;
+}
+
+void HandleChangeLanguage(StringHash eventType, VariantMap& eventData)
+{
+    Array<UIElement@> children = uiMenuBar.GetChildren();
+
+    for (uint i = 0; i < children.length - 2; ++i) // last 2 elements is not menu
+    {
+        // dirty hack: force recalc text size
+        children[i].maxWidth = 1000;
+        Text@ text = children[i].children[0];
+        text.minWidth = 0;
+        text.maxWidth = 1;
+        text.ApplyAttributes();
+        children[i].maxWidth = text.width + 20;
+    }
+
+    RebuildResourceDatabase();
 }
 
 Text@ CreateAccelKeyText(int accelKey, int accelQual)
@@ -835,6 +1018,8 @@ Text@ CreateAccelKeyText(int accelKey, int accelQual)
         text = "F12";
     else if (accelKey == SHOW_POPUP_INDICATOR)
         text = ">";
+    else if (accelKey == KEY_KP_PERIOD)
+        text = "NumPad .";
     else
         text.AppendUTF8(accelKey);
     if (accelQual & QUAL_ALT > 0)
@@ -884,15 +1069,20 @@ void FinalizedPopupMenu(Window@ popup)
 }
 
 void CreateFileSelector(const String&in title, const String&in ok, const String&in cancel, const String&in initialPath, Array<String>@ filters,
-    uint initialFilter)
+    uint initialFilter, bool autoLocalizeTitle = true)
 {
     // Within the editor UI, the file selector is a kind of a "singleton". When the previous one is overwritten, also
     // the events subscribed from it are disconnected, so new ones are safe to subscribe.
     uiFileSelector = FileSelector();
     uiFileSelector.defaultStyle = uiStyle;
     uiFileSelector.title = title;
+    uiFileSelector.titleText.autoLocalizable = autoLocalizeTitle;
     uiFileSelector.path = initialPath;
     uiFileSelector.SetButtonTexts(ok, cancel);
+    Text@ okText = cast<Text>(uiFileSelector.okButton.children[0]);
+    okText.autoLocalizable = true;
+    Text@ cancelText = cast<Text>(uiFileSelector.cancelButton.children[0]);
+    cancelText.autoLocalizable = true;
     uiFileSelector.SetFilters(filters, initialFilter);
     CenterDialog(uiFileSelector.window);
 }
@@ -930,7 +1120,7 @@ void CreateDebugHud()
 void CenterDialog(UIElement@ element)
 {
     IntVector2 size = element.size;
-    element.SetPosition((graphics.width - size.x) / 2, (graphics.height - size.y) / 2);
+    element.SetPosition((ui.root.width - size.x) / 2, (ui.root.height - size.y) / 2);
 }
 
 void CreateContextMenu()
@@ -942,7 +1132,7 @@ void CreateContextMenu()
 void UpdateWindowTitle()
 {
     String sceneName = GetFileNameAndExtension(editorScene.fileName);
-    if (sceneName.empty || sceneName == TEMP_SCENE_NAME)
+    if (sceneName.empty || sceneName == TEMP_SCENE_NAME || sceneName == TEMP_BINARY_SCENE_NAME)
         sceneName = "Untitled";
     if (sceneModified)
         sceneName += "*";
@@ -992,6 +1182,7 @@ void HandleOpenSceneFile(StringHash eventType, VariantMap& eventData)
 {
     CloseFileSelector(uiSceneFilter, uiScenePath);
     LoadScene(ExtractFileName(eventData));
+    SendEvent(EDITOR_EVENT_SCENE_LOADED);
 }
 
 void HandleSaveSceneFile(StringHash eventType, VariantMap& eventData)
@@ -1017,11 +1208,28 @@ void HandleImportModel(StringHash eventType, VariantMap& eventData)
     CloseFileSelector(uiImportFilter, uiImportPath);
     ImportModel(ExtractFileName(eventData));
 }
+void HandleImportAnimation(StringHash eventType, VariantMap& eventData)
+{
+    CloseFileSelector(uiImportFilter, uiImportPath);
+    ImportAnimation(ExtractFileName(eventData));
+}
 
 void HandleImportScene(StringHash eventType, VariantMap& eventData)
 {
     CloseFileSelector(uiImportFilter, uiImportPath);
     ImportScene(ExtractFileName(eventData));
+}
+
+void HandleExportSceneOBJ(StringHash eventType, VariantMap& eventData)
+{
+    CloseFileSelector(uiExportFilter, uiExportPath);
+    ExportSceneToOBJ(ExtractFileName(eventData));
+}
+
+void HandleExportSelectedOBJ(StringHash eventType, VariantMap& eventData)
+{
+    CloseFileSelector(uiExportFilter, uiExportPath);
+    ExportSelectedToOBJ(ExtractFileName(eventData));
 }
 
 
@@ -1046,7 +1254,13 @@ void ExecuteScript(const String&in fileName)
 void HandleRunScript(StringHash eventType, VariantMap& eventData)
 {
     CloseFileSelector(uiScriptFilter, uiScriptPath);
+
+    suppressSceneChanges = true;
     ExecuteScript(ExtractFileName(eventData));
+    suppressSceneChanges = false;
+
+    UpdateHierarchyItem(editorScene, true);
+    UpdateHierarchyItem(editorUIElement, true);
 }
 
 void HandleResourcePath(StringHash eventType, VariantMap& eventData)
@@ -1087,12 +1301,184 @@ void HandleUIElementDefaultStyle(StringHash eventType, VariantMap& eventData)
     SetUIElementDefaultStyle(ExtractFileName(eventData));
 }
 
-void HandleKeyDown(StringHash eventType, VariantMap& eventData)
+void HandleHotKeysBlender( VariantMap& eventData)
 {
     int key = eventData["Key"].GetInt();
     int viewDirection = eventData["Qualifiers"].GetInt() == QUAL_CTRL ? -1 : 1;
 
-    if (key == KEY_ESC)
+    if (key == KEY_ESCAPE)
+    {
+        if (uiHidden)
+            UnhideUI();
+        else if (console.visible)
+            console.visible = false;
+        else if (contextMenu.visible)
+            CloseContextMenu();
+        else if (quickMenu.visible)
+        {
+            quickMenu.visible = false;
+            quickMenu.enabled = false;
+        }
+        else
+        {
+            UIElement@ front = ui.frontElement;
+            if (front is settingsDialog || front is preferencesDialog)
+            {
+                ui.focusElement = null;
+                front.visible = false;
+            }
+        }
+    }
+    // Ignore other keys when UI has a modal element
+    else if (ui.HasModalElement())
+        return;
+
+    else if (key == KEY_F1)
+        console.Toggle();
+    else if (key == KEY_F2)
+        ToggleRenderingDebug();
+    else if (key == KEY_F3)
+        TogglePhysicsDebug();
+    else if (key == KEY_F4)
+        ToggleOctreeDebug();
+    else if (key == KEY_F5)
+        ToggleNavigationDebug();
+    else if (key == KEY_F11)
+    {
+        Image@ screenshot = Image();
+        graphics.TakeScreenShot(screenshot);
+        if (!fileSystem.DirExists(screenshotDir))
+            fileSystem.CreateDir(screenshotDir);
+        screenshot.SavePNG(screenshotDir + "/Screenshot_" +
+                time.timeStamp.Replaced(':', '_').Replaced('.', '_').Replaced(' ', '_') + ".png");
+    }
+    // In Blender, HOME key is for locating the selected objects by pan and
+    // the PERIOD key of keypad is for moving the camera to focus the selected.
+    // Here we ignore the difference.
+    else if ((key == KEY_HOME || key == KEY_KP_PERIOD) && ui.focusElement is null)
+    {
+        if (selectedNodes.length > 0 || selectedComponents.length > 0)
+        {
+            LocateNodesAndComponents(selectedNodes, selectedComponents);
+        }
+    }
+    else if (key == KEY_KP_1 && ui.focusElement is null) // Front view
+    {
+        cameraSmoothInterpolate.Finish();
+
+        Vector3 pos = -Vector3(0.0, 0.0, cameraNode.position.length * viewDirection);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, 0, viewDirection));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
+    }
+    else if ((key == KEY_KP_3 || key == KEY_KP_9) && ui.focusElement is null) // Side view
+    {
+        cameraSmoothInterpolate.Finish();
+
+        Vector3 pos = -Vector3(cameraNode.position.length * -viewDirection, 0.0, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(-viewDirection, 0, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
+    }
+    else if (key == KEY_KP_7 && ui.focusElement is null) // Top view
+    {
+        cameraSmoothInterpolate.Finish();
+
+        Vector3 pos = -Vector3(0.0, cameraNode.position.length * -viewDirection, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, -viewDirection, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
+    }
+    else if (key == KEY_KP_5 && ui.focusElement is null)
+    {
+        activeViewport.ToggleOrthographic();
+    }
+    else if (key == '4' && ui.focusElement is null)
+        editMode = EDIT_SELECT;
+    else if (key == '5' && ui.focusElement is null)
+        axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
+    else if (key == '6' && ui.focusElement is null)
+    {
+        --pickMode;
+        if (pickMode < PICK_GEOMETRIES)
+                pickMode = MAX_PICK_MODES - 1;
+    }
+    else if (key == '7' && ui.focusElement is null)
+    {
+        ++pickMode;
+        if (pickMode >= MAX_PICK_MODES)
+            pickMode = PICK_GEOMETRIES;
+    }
+    else if (key == KEY_Z && eventData["Qualifiers"].GetInt() != QUAL_CTRL)
+    {
+        if (ui.focusElement is null)
+        {
+            fillMode = FillMode(fillMode + 1);
+            if (fillMode > FILL_POINT)
+                fillMode = FILL_SOLID;
+
+            // Update camera fill mode
+            SetFillMode(fillMode);
+        }
+    }
+    else if (key == KEY_SPACE)
+    {
+        if (ui.cursor.visible && ui.focusElement is null)
+            ToggleQuickMenu();
+    }
+    else
+    {
+        SteppedObjectManipulation(key);
+    }
+
+    if ((ui.focusElement is null) && (selectedNodes.length > 0) && !cameraFlyMode)
+    {
+         if (eventData["Qualifiers"].GetInt() == QUAL_ALT) // reset transformations
+         {
+            if (key == KEY_G)
+                SceneResetPosition();
+            else if (key == KEY_R)
+                SceneResetRotation();
+            else if (key == KEY_S)
+                SceneResetScale();
+         }
+         else if (eventData["Qualifiers"].GetInt() != QUAL_CTRL) // set transformations
+         {
+            if (key == KEY_G)
+            {
+                editMode = EDIT_MOVE;
+                axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
+
+            }
+            else if (key == KEY_R)
+            {
+                editMode = EDIT_ROTATE;
+                axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
+
+            }
+            else if (key == KEY_S)
+            {
+                editMode = EDIT_SCALE;
+                axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
+            }
+         }
+    }
+
+    toolBarDirty = true;
+}
+
+void HandleHotKeysStandard(VariantMap& eventData)
+{
+    int key = eventData["Key"].GetInt();
+    int viewDirection = eventData["Qualifiers"].GetInt() == QUAL_CTRL ? -1 : 1;
+
+    if (key == KEY_ESCAPE)
     {
         if (uiHidden)
             UnhideUI();
@@ -1128,6 +1514,8 @@ void HandleKeyDown(StringHash eventType, VariantMap& eventData)
         TogglePhysicsDebug();
     else if (key == KEY_F4)
         ToggleOctreeDebug();
+    else if (key == KEY_F5)
+        ToggleNavigationDebug();
     else if (key == KEY_F11)
     {
         Image@ screenshot = Image();
@@ -1136,48 +1524,51 @@ void HandleKeyDown(StringHash eventType, VariantMap& eventData)
             fileSystem.CreateDir(screenshotDir);
         screenshot.SavePNG(screenshotDir + "/Screenshot_" +
                 time.timeStamp.Replaced(':', '_').Replaced('.', '_').Replaced(' ', '_') + ".png");
-    }   
+    }
+    else if ((key == KEY_HOME || key == KEY_F) && ui.focusElement is null)
+    {
+        if (selectedNodes.length > 0 || selectedComponents.length > 0)
+        {
+            LocateNodesAndComponents(selectedNodes, selectedComponents);
+        }
+    }
     else if (key == KEY_KP_1 && ui.focusElement is null) // Front view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
-            
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(0.0, 0.0, pos.length * viewDirection);
-        cameraNode.direction = Vector3(0, 0, viewDirection);
-        ReacquireCameraYawPitch();
-    }
+        cameraSmoothInterpolate.Finish();
 
-    else if (key == KEY_KP_3 && ui.focusElement is null) // Side view
+        Vector3 pos = -Vector3(0.0, 0.0, cameraNode.position.length * viewDirection);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, 0, viewDirection));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
+    }
+    else if ((key == KEY_KP_3 || key == KEY_KP_9) && ui.focusElement is null) // Side view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
-            
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(pos.length * -viewDirection, 0.0, 0.0);
-        cameraNode.direction = Vector3(-viewDirection, 0, 0);
-        ReacquireCameraYawPitch();
-    }
+        cameraSmoothInterpolate.Finish();
 
+        Vector3 pos = -Vector3(cameraNode.position.length * -viewDirection, 0.0, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(-viewDirection, 0, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
+    }
     else if (key == KEY_KP_7 && ui.focusElement is null) // Top view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
-            
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(0.0, pos.length * -viewDirection, 0.0);
-        cameraNode.direction = Vector3(0, -viewDirection, 0);
-        ReacquireCameraYawPitch();
-    }
+        cameraSmoothInterpolate.Finish();
 
+        Vector3 pos = -Vector3(0.0, cameraNode.position.length * -viewDirection, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, -viewDirection, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
+    }
     else if (key == KEY_KP_5 && ui.focusElement is null)
     {
         activeViewport.ToggleOrthographic();
     }
-
     else if (eventData["Qualifiers"].GetInt() == QUAL_CTRL)
     {
         if (key == '1')
@@ -1202,7 +1593,7 @@ void HandleKeyDown(StringHash eventType, VariantMap& eventData)
             if (pickMode >= MAX_PICK_MODES)
                 pickMode = PICK_GEOMETRIES;
         }
-        else if (key == 'W')
+        else if (key == KEY_W)
         {
             fillMode = FillMode(fillMode + 1);
             if (fillMode > FILL_POINT)
@@ -1218,7 +1609,20 @@ void HandleKeyDown(StringHash eventType, VariantMap& eventData)
         }
         else
             SteppedObjectManipulation(key);
+
         toolBarDirty = true;
+    }
+}
+
+void HandleKeyDown(StringHash eventType, VariantMap& eventData)
+{
+    if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+    {
+        HandleHotKeysStandard(eventData);
+    }
+    else if( hotKeyMode == HOTKEYS_MODE_BLENDER)
+    {
+        HandleHotKeysBlender(eventData);
     }
 }
 
@@ -1258,6 +1662,8 @@ void HideUI(bool hide = true)
     if (uiHidden == hide)
         return;
 
+    // Note: we could set ui.root.visible = false and it would hide the whole hierarchy.
+    // However in this case we need the editorUIElement to stay visible
     bool visible = !(uiHidden = hide);
     Array<UIElement@> children = ui.root.GetChildren();
     for (uint i = 0; i < children.length; ++i)
@@ -1341,6 +1747,7 @@ void SetIconEnabledColor(UIElement@ element, bool enabled, bool partial = false)
 void UpdateDirtyUI()
 {
     UpdateDirtyToolBar();
+	terrainEditor.UpdateDirty();
 
     // Perform hierarchy selection latently after the new selections are finalized (used in undo/redo action)
     if (!hierarchyUpdateSelections.empty)
@@ -1356,7 +1763,7 @@ void UpdateDirtyUI()
 
 void HandleMessageAcknowledgement(StringHash eventType, VariantMap& eventData)
 {
-    if (eventData["Ok"].GetBool())
+    if (eventData["OK"].GetBool())
         messageBoxCallback();
     else
         messageBoxCallback = null;
@@ -1369,7 +1776,7 @@ void PopulateMruScenes()
     {
         recentSceneMenu.enabled = true;
         for (uint i=0; i < uiRecentScenes.length; ++i)
-            mruScenesPopup.AddChild(CreateMenuItem(uiRecentScenes[i], @LoadMostRecentScene, 0, 0, false));
+            mruScenesPopup.AddChild(CreateMenuItem(uiRecentScenes[i], @LoadMostRecentScene, 0, 0, false, "", false));
     }
     else
         recentSceneMenu.enabled = false;
@@ -1423,16 +1830,18 @@ void ActivateContextMenu(Array<UIElement@> actions)
     OpenContextMenu();
 }
 
-Menu@ CreateContextMenuItem(String text, String handler)
+Menu@ CreateContextMenuItem(String text, String handler, String menuName = "", bool autoLocalize = true)
 {
     Menu@ menu = Menu();
     menu.defaultStyle = uiStyle;
     menu.style = AUTO_STYLE;
+    menu.name = menuName;
     menu.SetLayout(LM_HORIZONTAL, 0, IntRect(8, 2, 8, 2));
     Text@ menuText = Text();
     menuText.style = "EditorMenuText";
     menu.AddChild(menuText);
     menuText.text = text;
+    menuText.autoLocalizable = autoLocalize;
     menu.vars[VAR_CONTEXT_MENU_HANDLER] = handler;
     SubscribeToEvent(menu, "Released", "ContextMenuEventWrapper");
     return menu;
@@ -1477,4 +1886,381 @@ XMLFile@ GetEditorUIXMLFile(const String&in fileName)
 UIElement@ LoadEditorUI(const String&in fileName)
 {
     return ui.LoadLayout(GetEditorUIXMLFile(fileName));
+}
+
+/// Set node children as a spline path, either cyclic or non-cyclic
+bool SetSplinePath()
+{
+    Menu@ menu = GetEventSender();
+    if (menu is null)
+        return false;
+
+    return SceneSetChildrenSplinePath(menu.name == "Cyclic");
+}
+
+bool ColorWheelBuildMenuSelectTypeColor()
+{
+    if (selectedNodes.empty && selectedComponents.empty) return false;
+    editMode = EDIT_SELECT;
+
+    // do coloring only for single selected object
+    // start with trying to find single component
+    if (selectedComponents.length == 1)
+    {
+        coloringComponent = selectedComponents[0];
+    }
+    // else try to get first component from selected node
+    else if (selectedNodes.length == 1)
+    {
+        Array<Component@> components = selectedNodes[0].GetComponents();
+        if (components.length > 0)
+        {
+            coloringComponent = components[0];
+        }
+    }
+    else
+        return false;
+
+    if (coloringComponent is null) return false;
+
+    Array<UIElement@> actions;
+
+    if (coloringComponent.typeName == "Light")
+    {
+        actions.Push(CreateContextMenuItem("Light color", "HandleColorWheelMenu", "menuLightColor"));
+        actions.Push(CreateContextMenuItem("Specular intensity", "HandleColorWheelMenu", "menuSpecularIntensity"));
+        actions.Push(CreateContextMenuItem("Brightness multiplier", "HandleColorWheelMenu", "menuBrightnessMultiplier"));
+
+        actions.Push(CreateContextMenuItem("Cancel", "HandleColorWheelMenu", "menuCancel"));
+
+    }
+    else if (coloringComponent.typeName == "StaticModel")
+    {
+        actions.Push(CreateContextMenuItem("Diffuse color", "HandleColorWheelMenu", "menuDiffuseColor"));
+        actions.Push(CreateContextMenuItem("Specular color", "HandleColorWheelMenu", "menuSpecularColor"));
+        actions.Push(CreateContextMenuItem("Emissive color", "HandleColorWheelMenu", "menuEmissiveColor"));
+        actions.Push(CreateContextMenuItem("Environment map color", "HandleColorWheelMenu", "menuEnvironmentMapColor"));
+
+        actions.Push(CreateContextMenuItem("Cancel", "HandleColorWheelMenu", "menuCancel"));
+    }
+    else if (coloringComponent.typeName == "Zone")
+    {
+        actions.Push(CreateContextMenuItem("Ambient color", "HandleColorWheelMenu", "menuAmbientColor"));
+        actions.Push(CreateContextMenuItem("Fog color", "HandleColorWheelMenu", "menuFogColor"));
+
+        actions.Push(CreateContextMenuItem("Cancel", "HandleColorWheelMenu", "menuCancel"));
+    }
+    else if (coloringComponent.typeName == "Text3D")
+    {
+        actions.Push(CreateContextMenuItem("Color", "HandleColorWheelMenu", "c"));
+        actions.Push(CreateContextMenuItem("Top left color", "HandleColorWheelMenu", "tl"));
+        actions.Push(CreateContextMenuItem("Top right color", "HandleColorWheelMenu", "tr"));
+        actions.Push(CreateContextMenuItem("Bottom left color", "HandleColorWheelMenu", "bl"));
+        actions.Push(CreateContextMenuItem("Bottom right color", "HandleColorWheelMenu", "br"));
+        actions.Push(CreateContextMenuItem("Cancel", "HandleColorWheelMenu", "menuCancel"));
+    }
+    if (actions.length > 0) {
+        ActivateContextMenu(actions);
+        return true;
+    }
+
+    return false;
+}
+
+void HandleColorWheelMenu()
+{
+    ColorWheelSetupBehaviorForColoring();
+}
+
+// color was changed, update color of all colorGroup for immediate preview;
+void HandleWheelChangeColor(StringHash eventType, VariantMap& eventData)
+{
+    if (timeToNextColoringGroupUpdate > time.systemTime) return;
+
+    if (coloringComponent !is null)
+    {
+        Color c = eventData["Color"].GetColor();  // current ColorWheel
+        // preview new color
+        if (coloringComponent.typeName == "Light")
+        {
+            Light@ light = cast<Light>(coloringComponent);
+            if (light !is null)
+            {
+                if (coloringPropertyName == "menuLightColor")
+                {
+                    light.color = c;
+                }
+                else if (coloringPropertyName == "menuSpecularIntensity")
+                {
+                   // multiply out
+                   light.specularIntensity = c.Value() * 10.0f;
+
+                }
+                else if (coloringPropertyName == "menuBrightnessMultiplier")
+                {
+                   light.brightness = c.Value() * 10.0f;
+
+                }
+
+                attributesDirty = true;
+            }
+        }
+        else if (coloringComponent.typeName == "StaticModel")
+        {
+            StaticModel@ model  = cast<StaticModel>(coloringComponent);
+            if (model !is null)
+            {
+                Material@ mat = model.materials[0];
+                if (mat !is null)
+                {
+                    if (coloringPropertyName == "menuDiffuseColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatDiffColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(c.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.a).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatDiffColor"] = newValue;
+                    }
+                    else if (coloringPropertyName == "menuSpecularColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatSpecColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(c.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.a * 128).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatSpecColor"] = newValue;
+                    }
+                    else if (coloringPropertyName == "menuEmissiveColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatEmissiveColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(c.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.a).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatEmissiveColor"] = newValue;
+                    }
+                    else if (coloringPropertyName == "menuEnvironmentMapColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatEnvMapColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(c.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(c.a).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatEnvMapColor"] = newValue;
+                    }
+                }
+            }
+        }
+        else if (coloringComponent.typeName == "Zone")
+        {
+            Zone@ zone  = cast<Zone>(coloringComponent);
+            if (zone !is null)
+            {
+                if (coloringPropertyName == "menuAmbientColor")
+                {
+                    zone.ambientColor = c;
+                }
+                else if (coloringPropertyName == "menuFogColor")
+                {
+                    zone.fogColor = c;
+                }
+
+                attributesDirty = true;
+            }
+        }
+        else if (coloringComponent.typeName == "Text3D") 
+        {
+            Text3D@ txt = cast<Text3D>(coloringComponent);
+            if (txt !is null) 
+            {
+                if (coloringPropertyName == "c")
+                    txt.color = c;
+                else if (coloringPropertyName == "tl") 
+                    txt.colors[C_TOPLEFT] = c;
+                else if (coloringPropertyName == "tr") 
+                    txt.colors[C_TOPRIGHT] = c;
+                else if (coloringPropertyName == "bl") 
+                    txt.colors[C_BOTTOMLEFT] = c;
+                else if (coloringPropertyName == "br") 
+                    txt.colors[C_BOTTOMRIGHT] = c;
+                attributesDirty = true;
+            }
+        }
+    }
+
+    timeToNextColoringGroupUpdate = time.systemTime + stepColoringGroupUpdate;
+}
+
+// Return old colors, wheel was closed or color discarded
+void HandleWheelDiscardColor(StringHash eventType, VariantMap& eventData)
+{
+    if (coloringComponent !is null)
+    {
+        //Color oldColor = eventData["Color"].GetColor(); //Old color from ColorWheel from ShowColorWheelWithColor(old)
+        Color oldColor = coloringOldColor;
+
+        // preview new color
+        if (coloringComponent.typeName == "Light")
+        {
+            Light@ light = cast<Light>(coloringComponent);
+            if (light !is null)
+            {
+                if (coloringPropertyName == "menuLightColor")
+                {
+                    light.color = oldColor;
+                }
+                else if (coloringPropertyName == "menuSpecularIntensity")
+                {
+                   light.specularIntensity = coloringOldScalar * 10.0f;
+
+                }
+                else if (coloringPropertyName == "menuBrightnessMultiplier")
+                {
+                   light.brightness = coloringOldScalar * 10.0f;
+
+                }
+
+                attributesDirty = true;
+            }
+        }
+        else if (coloringComponent.typeName == "StaticModel")
+        {
+            StaticModel@ model  = cast<StaticModel>(coloringComponent);
+            if (model !is null)
+            {
+                Material@ mat = model.materials[0];
+                if (mat !is null)
+                {
+                    if (coloringPropertyName == "menuDiffuseColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatDiffColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(oldColor.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.a).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatDiffColor"] = newValue;
+                    }
+                    else if (coloringPropertyName == "menuSpecularColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatSpecColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(oldColor.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(coloringOldScalar).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatSpecColor"] = newValue;
+                    }
+                    else if (coloringPropertyName == "menuEmissiveColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatEmissiveColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(oldColor.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.a).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatEmissiveColor"] = newValue;
+                    }
+                    else if (coloringPropertyName == "menuEnvironmentMapColor")
+                    {
+                        Variant oldValue = mat.shaderParameters["MatEnvMapColor"];
+                        Variant newValue;
+                        String valueString;
+                        valueString += String(oldColor.r).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.g).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.b).Substring(0,5);
+                        valueString += " ";
+                        valueString += String(oldColor.a).Substring(0,5);
+                        newValue.FromString(oldValue.type, valueString);
+                        mat.shaderParameters["MatEnvMapColor"] = newValue;
+                    }
+                }
+            }
+        }
+        else if (coloringComponent.typeName == "Zone")
+        {
+            Zone@ zone  = cast<Zone>(coloringComponent);
+            if (zone !is null)
+            {
+                if (coloringPropertyName == "menuAmbientColor")
+                {
+                    zone.ambientColor = oldColor;
+                }
+                else if (coloringPropertyName == "menuFogColor")
+                {
+                    zone.fogColor = oldColor;
+                }
+
+                attributesDirty = true;
+            }
+        }
+    }
+}
+
+// Applying color wheel changes to material
+void HandleWheelSelectColor(StringHash eventType, VariantMap& eventData)
+{
+    if (coloringComponent !is null)
+    if (coloringComponent.typeName == "StaticModel")
+    {
+        Color c = eventData["Color"].GetColor(); //Selected color from ColorWheel
+        StaticModel@ model  = cast<StaticModel>(coloringComponent);
+        if (model !is null)
+        {
+            Material@ mat = model.materials[0];
+            if (mat !is null)
+            {
+                editMaterial = mat;
+                SaveMaterial();
+            }
+        }
+    }
+}
+
+bool ViewDebugIcons()
+{
+    debugIconsShow = !debugIconsShow;
+    return true;
 }

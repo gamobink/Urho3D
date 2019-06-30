@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2015 the Urho3D project.
+// Copyright (c) 2008-2019 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,13 +30,13 @@ namespace Urho3D
 /// 2D circle collision component.
 class URHO3D_API CollisionCircle2D : public CollisionShape2D
 {
-    OBJECT(CollisionCircle2D);
+    URHO3D_OBJECT(CollisionCircle2D, CollisionShape2D);
 
 public:
     /// Construct.
-    CollisionCircle2D(Context* scontext);
+    explicit CollisionCircle2D(Context* context);
     /// Destruct.
-    virtual ~CollisionCircle2D();
+    ~CollisionCircle2D() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
@@ -49,12 +49,13 @@ public:
 
     /// Return radius.
     float GetRadius() const { return radius_; }
+
     /// Return center.
     const Vector2& GetCenter() const { return center_; }
 
 private:
     /// Apply node world scale.
-    virtual void ApplyNodeWorldScale();
+    void ApplyNodeWorldScale() override;
     /// Recreate fixture.
     void RecreateFixture();
 
